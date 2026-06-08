@@ -290,7 +290,6 @@ class _PlotDetailScreenState extends State<PlotDetailScreen> {
                       builder: (_) => ChatScreen(
                         chatId:    chat['_id'] as String,
                         ownerName: (chat['owner'] as Map?)?['name'] as String? ?? 'Owner',
-                        ownerId:   (chat['owner'] as Map?)?['_id']  as String? ?? '',
                         plotName:  _plot!['propertyName'] ?? 'Plot',
                       ),
                     ));

@@ -1,24 +1,20 @@
 import 'dart:async';
 import 'dart:typed_data';
-// ignore: avoid_web_libraries_in_flutter, deprecated_member_use
-import 'dart:html' as html;
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
-import 'call_screen.dart';
-import '../services/socket_service.dart';
 
 class ChatScreen extends StatefulWidget {
   final String chatId;
   final String ownerName;
-  final String ownerId;
   final String plotName;
   const ChatScreen({
     super.key,
     required this.chatId,
     required this.ownerName,
-    required this.ownerId,
     required this.plotName,
   });
   @override
@@ -26,23 +22,22 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final _ctrl      = TextEditingController();
-  final _scroll    = ScrollController();
+  final _ctrl = TextEditingController();
+  final _scroll = ScrollController();
   final List<Map<String, dynamic>> _messages = [];
 
-  bool    _sending    = false;
-  bool    _uploading  = false;
-  // ── Audio recording ──────────────────────────────────────────
-  bool    _recording  = false;
-  bool    _sendingAudio = false;
-  html.MediaRecorder? _mediaRecorder;
-  final List<dynamic> _audioChunks = [];
-  Timer?  _recordTimer;
-  int     _recordSeconds = 0;
-  bool    _loading   = true;
+  bool _sending = false;
+  bool _uploading = false;
+  bool _loading = true;
   String? _blocked;
   String? _lastTs;
-  Timer?  _pollTimer;
+  Timer? _pollTimer;
+
+  // Voice recording
+  final AudioRecorder _recorder = AudioRecorder();
+  bool _recording = false;
+  int _recSecs = 0;
+  Timer? _recTimer;
 
   @override
   void initState() {
@@ -55,10 +50,74 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _recTimer?.cancel();
+    _recorder.dispose();
     _ctrl.removeListener(_onTyping);
     _ctrl.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  // ── Record & send voice message ───────────────────────────────
+  Future<void> _toggleRecord() async {
+    if (_recording) {
+      final path = await _recorder.stop();
+      _recTimer?.cancel();
+      if (mounted) setState(() => _recording = false);
+      if (path == null) return;
+      try {
+        final bytes = await XFile(path).readAsBytes();
+        if (mounted) setState(() => _uploading = true);
+        final res = await Api.uploadChatAudio(
+            chatId: widget.chatId,
+            bytes: bytes,
+            fileName: 'voice.webm',
+            duration: _recSecs);
+        final msg = res['message'] as Map<String, dynamic>;
+        if (mounted) {
+          setState(() {
+            final idx = _messages.indexWhere((e) => e['_id'] == msg['_id']);
+            if (idx < 0) _messages.add(msg);
+            _lastTs = msg['createdAt'] as String?;
+          });
+          _scrollToBottom();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Voice send failed: $e'),
+              backgroundColor: C.error));
+        }
+      } finally {
+        if (mounted) setState(() => _uploading = false);
+      }
+    } else {
+      try {
+        if (!await _recorder.hasPermission()) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Microphone permission denied')));
+          }
+          return;
+        }
+        await _recorder.start(const RecordConfig(encoder: AudioEncoder.opus),
+            path: 'voice');
+        if (mounted)
+          setState(() {
+            _recording = true;
+            _recSecs = 0;
+          });
+        _recTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+          if (mounted) setState(() => _recSecs++);
+        });
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Could not start recording: $e'),
+              backgroundColor: C.error));
+        }
+      }
+    }
   }
 
   // ── Phone detection ───────────────────────────────────────────
@@ -72,9 +131,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void _onTyping() {
     final blocked = _looksLikePhone(_ctrl.text);
     if (blocked != (_blocked != null)) {
-      setState(() => _blocked = blocked
-          ? '🚫 Phone numbers are not allowed in chat.'
-          : null);
+      setState(() => _blocked =
+          blocked ? '🚫 Phone numbers are not allowed in chat.' : null);
     }
   }
 
@@ -82,7 +140,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _loadMessages() async {
     setState(() => _loading = true);
     try {
-      final res  = await Api.getChatMessages(widget.chatId);
+      final res = await Api.getChatMessages(widget.chatId);
       final list = res['messages'] as List? ?? [];
       if (mounted) {
         setState(() {
@@ -106,14 +164,20 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       try {
         final since = _lastTs ??
-            DateTime.now().subtract(const Duration(seconds: 10)).toIso8601String();
-        final res   = await Api.pollMessages(widget.chatId, since);
-        final list  = res['messages'] as List? ?? [];
+            DateTime.now()
+                .subtract(const Duration(seconds: 10))
+                .toIso8601String();
+        final res = await Api.pollMessages(widget.chatId, since);
+        final list = res['messages'] as List? ?? [];
         if (list.isNotEmpty && mounted) {
           setState(() {
             for (final m in list.cast<Map<String, dynamic>>()) {
               final idx = _messages.indexWhere((e) => e['_id'] == m['_id']);
-              if (idx >= 0) { _messages[idx] = m; } else { _messages.add(m); }
+              if (idx >= 0) {
+                _messages[idx] = m;
+              } else {
+                _messages.add(m);
+              }
             }
             _messages.sort((a, b) =>
                 (a['createdAt'] as String).compareTo(b['createdAt'] as String));
@@ -128,38 +192,30 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _scrollToBottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (_scroll.hasClients) {
-      _scroll.animateTo(_scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 260), curve: Curves.easeOut);
-    }
-  });
+        if (_scroll.hasClients) {
+          _scroll.animateTo(_scroll.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOut);
+        }
+      });
 
   // ── Pick & upload photo ───────────────────────────────────────
   Future<void> _pickPhoto() async {
-    List<int> bytes = [];
-    String    name  = 'photo.jpg';
-
-    if (kIsWeb) {
-      final input = html.FileUploadInputElement()
-        ..accept = 'image/jpeg,image/jpg,image/png,image/webp,image/gif'
-        ..multiple = false;
-      input.click();
-      await input.onChange.first;
-      if (input.files == null || input.files!.isEmpty) return;
-      final file   = input.files!.first;
-      // Build a safe filename with correct extension
-      final rawName = file.name;
-      final ext = rawName.contains('.')
-          ? rawName.substring(rawName.lastIndexOf('.')).toLowerCase()
-          : '.jpg';
-      final safeExt = ['.jpg','.jpeg','.png','.webp','.gif'].contains(ext) ? ext : '.jpg';
-      name = 'photo_${DateTime.now().millisecondsSinceEpoch}$safeExt';
-      final reader = html.FileReader();
-      reader.readAsArrayBuffer(file);
-      await reader.onLoad.first;
-      bytes = (reader.result as List<dynamic>).cast<int>();
-    } else {
-      // On mobile, skip — or integrate image_picker separately if needed
+    Uint8List bytes;
+    String name;
+    try {
+      final picker = ImagePicker();
+      final xf =
+          await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+      if (xf == null) return;
+      bytes = await xf.readAsBytes();
+      name = xf.name;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not pick photo: $e'),
+            backgroundColor: C.error));
+      }
       return;
     }
 
@@ -179,8 +235,7 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Upload failed: $e'),
-            backgroundColor: C.error));
+            content: Text('Upload failed: $e'), backgroundColor: C.error));
       }
     } finally {
       if (mounted) setState(() => _uploading = false);
@@ -188,95 +243,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ── Send text / link / image URL ─────────────────────────────
-  // ── Audio recording methods ─────────────────────────────────
-  // Tap mic to START, tap stop button to SEND, tap cancel to discard
-  Future<void> _startRecording() async {
-    if (!kIsWeb) return;
-    if (_recording) { await _stopRecording(); return; }
-    try {
-      final stream = await html.window.navigator.mediaDevices
-          ?.getUserMedia({'audio': true});
-      if (stream == null) { _showSnack('Could not access microphone'); return; }
-      _audioChunks.clear();
-      // Try webm/opus first, fallback to default
-      final mimeType = html.MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : html.MediaRecorder.isTypeSupported('audio/webm')
-              ? 'audio/webm'
-              : '';
-      _mediaRecorder = mimeType.isNotEmpty
-          ? html.MediaRecorder(stream, {'mimeType': mimeType})
-          : html.MediaRecorder(stream);
-      _mediaRecorder!.addEventListener('dataavailable', (e) {
-        final blob = (e as html.BlobEvent).data;
-        if (blob != null && blob.size > 0) _audioChunks.add(blob);
-      });
-      _mediaRecorder!.start(250); // collect chunks every 250ms
-      _recordSeconds = 0;
-      _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted) setState(() => _recordSeconds++);
-      });
-      setState(() => _recording = true);
-    } catch (e) {
-      _showSnack('Microphone access denied. Allow mic in browser settings.');
-    }
-  }
-
-  Future<void> _stopRecording() async {
-    if (_mediaRecorder == null) return;
-    _recordTimer?.cancel();
-    // Request final chunk then wait for stop
-    _mediaRecorder!.requestData();
-    final completer = Completer<void>();
-    _mediaRecorder!.addEventListener('stop', (_) => completer.complete());
-    _mediaRecorder!.stop();
-    await completer.future;
-    // Stop all mic tracks to release the mic
-    _mediaRecorder!.stream?.getTracks().forEach((t) => t.stop());
-    setState(() { _recording = false; _sendingAudio = true; });
-    try {
-      if (_audioChunks.isEmpty) { _showSnack('No audio recorded'); return; }
-      final blob = html.Blob(List<dynamic>.from(_audioChunks), 'audio/webm');
-      final reader = html.FileReader();
-      reader.readAsArrayBuffer(blob);
-      await reader.onLoad.first;
-      // Flutter web returns NativeUint8List or ByteBuffer depending on version
-      final result = reader.result;
-      final List<int> bytes;
-      if (result is ByteBuffer) {
-        bytes = result.asUint8List();
-      } else {
-        bytes = (result as dynamic).buffer.asUint8List() as List<int>;
-      }
-      final fileName = 'voice_${DateTime.now().millisecondsSinceEpoch}.webm';
-      await Api.uploadChatAudio(chatId: widget.chatId, bytes: bytes, fileName: fileName);
-      _audioChunks.clear();
-      _mediaRecorder = null;
-    } catch (e) {
-      _showSnack('Failed to send audio: $e');
-    } finally {
-      if (mounted) setState(() => _sendingAudio = false);
-    }
-  }
-
-  void _cancelRecording() {
-    _recordTimer?.cancel();
-    _mediaRecorder?.stream?.getTracks().forEach((t) => t.stop());
-    _mediaRecorder?.stop();
-    _audioChunks.clear();
-    _mediaRecorder = null;
-    setState(() { _recording = false; _recordSeconds = 0; });
-  }
-
-  void _showSnack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: C.error));
-  }
-
-  String _fmtRecordTime(int s) =>
-      '${(s ~/ 60).toString().padLeft(2, "0")}:${(s % 60).toString().padLeft(2, "0")}';
-
   Future<void> _send() async {
     final text = _ctrl.text.trim();
     if (text.isEmpty) return;
@@ -285,15 +251,18 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    setState(() { _sending = true; _blocked = null; });
+    setState(() {
+      _sending = true;
+      _blocked = null;
+    });
     try {
       final isImgUrl = _isImageUrl(text);
-      final isLink   = !isImgUrl && _isUrl(text);
+      final isLink = !isImgUrl && _isUrl(text);
       final res = await Api.sendMessage(
-        chatId:   widget.chatId,
-        text:     isImgUrl || isLink ? '' : text,
+        chatId: widget.chatId,
+        text: isImgUrl || isLink ? '' : text,
         imageUrl: isImgUrl ? text : null,
-        linkUrl:  isLink   ? text : null,
+        linkUrl: isLink ? text : null,
       );
       final msg = res['message'] as Map<String, dynamic>;
       if (mounted) {
@@ -311,8 +280,8 @@ class _ChatScreenState extends State<ChatScreen> {
         if (err.contains('phone') || err.contains('blocked')) {
           setState(() => _blocked = '🚫 $err');
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(err), backgroundColor: C.error));
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(err), backgroundColor: C.error));
         }
       }
     } finally {
@@ -326,8 +295,7 @@ class _ChatScreenState extends State<ChatScreen> {
         RegExp(r'\.(jpg|jpeg|png|gif|webp)(\?|$)').hasMatch(l);
   }
 
-  bool _isUrl(String t) =>
-      t.startsWith('http://') || t.startsWith('https://');
+  bool _isUrl(String t) => t.startsWith('http://') || t.startsWith('https://');
 
   // ── Delete for everyone ───────────────────────────────────────
   Future<void> _directDelete(String msgId) async {
@@ -373,20 +341,81 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // ── Edit message ──────────────────────────────────────────────
+  Future<void> _editMessage(String msgId, String currentText) async {
+    final ctrl = TextEditingController(text: currentText);
+    final newText = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Edit Message',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLines: null,
+          decoration: InputDecoration(
+            hintText: 'Edit your message',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: C.textMuted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+            child: const Text('Save',
+                style:
+                    TextStyle(color: C.primary, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (newText == null ||
+        newText.isEmpty ||
+        newText == currentText ||
+        !mounted) {
+      return;
+    }
+    try {
+      final res = await Api.editMessage(
+          chatId: widget.chatId, msgId: msgId, newText: newText);
+      final updated = res['message'] as Map<String, dynamic>;
+      if (mounted) {
+        setState(() {
+          final idx = _messages.indexWhere((m) => m['_id'] == msgId);
+          if (idx >= 0) _messages[idx] = updated;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.toString().replaceAll('Exception: ', '')),
+            backgroundColor: C.error));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: C.bg,
       appBar: AppBar(
-        backgroundColor: Colors.white, elevation: 0,
+        backgroundColor: Colors.white,
+        elevation: 0,
         leading: const BackButton(color: C.textDark),
         title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(widget.ownerName,
-              style: const TextStyle(fontSize: 15,
-                  fontWeight: FontWeight.w800, color: C.textDark)),
+              style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: C.textDark)),
           Text('re: ${widget.plotName}',
               style: const TextStyle(fontSize: 12, color: C.textMuted),
-              maxLines: 1, overflow: TextOverflow.ellipsis),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
         ]),
         actions: [
           Container(
@@ -398,8 +427,10 @@ class _ChatScreenState extends State<ChatScreen> {
               Icon(Icons.shield_outlined, size: 12, color: C.primary),
               SizedBox(width: 4),
               Text('Safe Chat',
-                  style: TextStyle(fontSize: 11,
-                      fontWeight: FontWeight.w700, color: C.primary)),
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: C.primary)),
             ]),
           ),
         ],
@@ -412,7 +443,8 @@ class _ChatScreenState extends State<ChatScreen> {
           child: const Row(children: [
             Icon(Icons.info_outline_rounded, size: 14, color: C.primary),
             SizedBox(width: 8),
-            Expanded(child: Text(
+            Expanded(
+                child: Text(
               'Phone numbers are blocked. Share text, images and links safely.',
               style: TextStyle(fontSize: 11, color: C.primary, height: 1.3),
             )),
@@ -431,17 +463,16 @@ class _ChatScreenState extends State<ChatScreen> {
                           horizontal: 14, vertical: 10),
                       itemCount: _messages.length,
                       itemBuilder: (_, i) {
-                        final m      = _messages[i];
-                        final isMe   = (m['senderType'] as String?) == 'customer';
+                        final m = _messages[i];
+                        final isMe = (m['senderType'] as String?) == 'customer';
                         final isDFMe = m['deletedForSender'] as bool? ?? false;
                         if (isDFMe) return const SizedBox.shrink();
-                        final isDel  = m['deletedForEveryone'] as bool? ?? false;
+                        final isDel = m['deletedForEveryone'] as bool? ?? false;
                         final showDate = i == 0 ||
                             !_sameDay(
                               m['createdAt'] as String?,
                               _messages[i - 1]['createdAt'] as String?,
                             );
-                        final bubble = _MsgBubble(msg: m, isMe: isMe);
                         return Column(children: [
                           if (showDate)
                             _DateDivider(ts: m['createdAt'] as String?),
@@ -449,16 +480,14 @@ class _ChatScreenState extends State<ChatScreen> {
                             alignment: isMe
                                 ? Alignment.centerRight
                                 : Alignment.centerLeft,
-                            // Only show delete icon on OWN messages
-                            child: isMe
-                                ? _ChatHoverWrapper(
-                                    isMe:      isMe,
-                                    isDeleted: isDel,
-                                    onDelete:  () => _directDelete(
-                                        m['_id'] as String),
-                                    child: bubble,
-                                  )
-                                : bubble,
+                            child: _ChatHoverWrapper(
+                              isMe: isMe,
+                              isDeleted: isDel,
+                              onEdit: () => _editMessage(m['_id'] as String,
+                                  m['text'] as String? ?? ''),
+                              onDelete: () => _directDelete(m['_id'] as String),
+                              child: _MsgBubble(msg: m, isMe: isMe),
+                            ),
                           ),
                         ]);
                       },
@@ -471,13 +500,36 @@ class _ChatScreenState extends State<ChatScreen> {
             color: C.primaryLight,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: const Row(children: [
-              SizedBox(width: 16, height: 16,
+              SizedBox(
+                  width: 16,
+                  height: 16,
                   child: CircularProgressIndicator(
                       color: C.primary, strokeWidth: 2)),
               SizedBox(width: 10),
               Text('Uploading photo…',
-                  style: TextStyle(fontSize: 13, color: C.primary,
+                  style: TextStyle(
+                      fontSize: 13,
+                      color: C.primary,
                       fontWeight: FontWeight.w600)),
+            ]),
+          ),
+
+        // Recording indicator
+        if (_recording)
+          Container(
+            color: C.errorBg,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(children: [
+              const Icon(Icons.fiber_manual_record, color: C.error, size: 13),
+              const SizedBox(width: 8),
+              Text('Recording…  ${_recSecs}s',
+                  style: const TextStyle(
+                      fontSize: 13,
+                      color: C.error,
+                      fontWeight: FontWeight.w600)),
+              const Spacer(),
+              const Text('tap ■ to send',
+                  style: TextStyle(fontSize: 12, color: C.textMuted)),
             ]),
           ),
 
@@ -494,28 +546,9 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Row(children: [
               const Icon(Icons.block_rounded, color: C.error, size: 15),
               const SizedBox(width: 8),
-              Expanded(child: Text(_blocked!,
-                  style: const TextStyle(color: C.error, fontSize: 12))),
-            ]),
-          ),
-
-        // Recording indicator
-        if (_recording)
-          Container(
-            color: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(children: [
-              Container(width: 8, height: 8,
-                  decoration: const BoxDecoration(color: C.error, shape: BoxShape.circle)),
-              const SizedBox(width: 8),
-              Text('Recording… ${_fmtRecordTime(_recordSeconds)}',
-                  style: const TextStyle(color: C.error, fontSize: 13, fontWeight: FontWeight.w600)),
-              const Spacer(),
-              GestureDetector(
-                onTap: _cancelRecording,
-                child: const Text('Cancel',
-                    style: TextStyle(color: C.textMuted, fontSize: 13)),
-              ),
+              Expanded(
+                  child: Text(_blocked!,
+                      style: const TextStyle(color: C.error, fontSize: 12))),
             ]),
           ),
 
@@ -529,15 +562,34 @@ class _ChatScreenState extends State<ChatScreen> {
             GestureDetector(
               onTap: _uploading ? null : _pickPhoto,
               child: Container(
-                width: 40, height: 40,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: C.primaryLight,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color: C.primary.withValues(alpha: 0.3)),
+                  border: Border.all(color: C.primary.withValues(alpha: 0.3)),
                 ),
                 child: const Icon(Icons.add_photo_alternate_rounded,
                     size: 20, color: C.primary),
+              ),
+            ),
+            const SizedBox(width: 8),
+
+            // Mic / record button
+            GestureDetector(
+              onTap: _uploading ? null : _toggleRecord,
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: _recording ? C.error : C.primaryLight,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: (_recording ? C.error : C.primary)
+                          .withValues(alpha: 0.3)),
+                ),
+                child: Icon(_recording ? Icons.stop_rounded : Icons.mic_rounded,
+                    size: 20, color: _recording ? Colors.white : C.primary),
               ),
             ),
             const SizedBox(width: 8),
@@ -546,15 +598,16 @@ class _ChatScreenState extends State<ChatScreen> {
             Expanded(
               child: TextField(
                 controller: _ctrl,
-                minLines: 1, maxLines: 4,
+                minLines: 1,
+                maxLines: 4,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: InputDecoration(
                   hintText: 'Message, link or image URL…',
-                  hintStyle: const TextStyle(
-                      color: C.textLight, fontSize: 14),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 10),
-                  filled: true, fillColor: C.bg,
+                  hintStyle: const TextStyle(color: C.textLight, fontSize: 14),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  filled: true,
+                  fillColor: C.bg,
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(22),
                       borderSide: const BorderSide(color: C.border)),
@@ -563,62 +616,46 @@ class _ChatScreenState extends State<ChatScreen> {
                       borderSide: const BorderSide(color: C.border)),
                   focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(22),
-                      borderSide: const BorderSide(
-                          color: C.primary, width: 1.5)),
+                      borderSide:
+                          const BorderSide(color: C.primary, width: 1.5)),
                 ),
               ),
             ),
             const SizedBox(width: 8),
 
-            // Send / Mic button — mic when text empty, send when text present
-            ValueListenableBuilder<TextEditingValue>(
-              valueListenable: _ctrl,
-              builder: (_, val, __) {
-                final hasText = val.text.trim().isNotEmpty;
-                if (hasText) {
-                  // Send button
-                  return GestureDetector(
-                    onTap: (_sending || _blocked != null) ? null : _send,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      width: 44, height: 44,
-                      decoration: BoxDecoration(
-                        gradient: (_blocked != null || _sending) ? null
-                            : const LinearGradient(colors: [C.primaryDark, C.primary]),
-                        color: (_blocked != null || _sending) ? C.textLight : null,
-                        shape: BoxShape.circle,
-                        boxShadow: (_blocked != null) ? []
-                            : [BoxShadow(color: C.primary.withValues(alpha: 0.3),
-                                blurRadius: 8, offset: const Offset(0, 3))],
-                      ),
-                      child: _sending
-                          ? const Center(child: SizedBox(width: 18, height: 18,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
-                          : const Icon(Icons.send_rounded, color: Colors.white, size: 20),
-                    ),
-                  );
-                }
-                // Mic button — tap to start, tap again (stop icon) to send
-                return GestureDetector(
-                  onTap: _recording ? _stopRecording : _startRecording,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: 44, height: 44,
-                    decoration: BoxDecoration(
-                      color: _recording ? C.error : C.primary,
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(
-                          color: (_recording ? C.error : C.primary).withValues(alpha: 0.35),
-                          blurRadius: 8, offset: const Offset(0, 3))],
-                    ),
-                    child: _sendingAudio
-                        ? const Center(child: SizedBox(width: 18, height: 18,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
-                        : Icon(_recording ? Icons.stop_circle_rounded : Icons.mic_rounded,
-                            color: Colors.white, size: 22),
-                  ),
-                );
-              },
+            // Send button
+            GestureDetector(
+              onTap: (_sending || _blocked != null) ? null : _send,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: (_blocked != null || _sending)
+                      ? null
+                      : const LinearGradient(
+                          colors: [C.primaryDark, C.primary]),
+                  color: (_blocked != null || _sending) ? C.textLight : null,
+                  shape: BoxShape.circle,
+                  boxShadow: (_blocked != null)
+                      ? []
+                      : [
+                          BoxShadow(
+                              color: C.primary.withValues(alpha: 0.3),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3))
+                        ],
+                ),
+                child: _sending
+                    ? const Center(
+                        child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2)))
+                    : const Icon(Icons.send_rounded,
+                        color: Colors.white, size: 20),
+              ),
             ),
           ]),
         ),
@@ -631,10 +668,10 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final da = DateTime.parse(a).toLocal();
       final db = DateTime.parse(b).toLocal();
-      return da.year == db.year &&
-             da.month == db.month &&
-             da.day == db.day;
-    } catch (_) { return false; }
+      return da.year == db.year && da.month == db.month && da.day == db.day;
+    } catch (_) {
+      return false;
+    }
   }
 }
 
@@ -643,11 +680,13 @@ class _ChatScreenState extends State<ChatScreen> {
 // ══════════════════════════════════════════════════════════════
 class _ChatHoverWrapper extends StatefulWidget {
   final Widget child;
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
   final bool isMe;
   final bool isDeleted;
   const _ChatHoverWrapper({
     required this.child,
+    required this.onEdit,
     required this.onDelete,
     required this.isMe,
     this.isDeleted = false,
@@ -661,7 +700,7 @@ class _ChatHoverWrapperState extends State<_ChatHoverWrapper>
   bool _hovered = false;
   bool _showMob = false;
   late AnimationController _anim;
-  late Animation<double>   _fade;
+  late Animation<double> _fade;
 
   @override
   void initState() {
@@ -672,13 +711,57 @@ class _ChatHoverWrapperState extends State<_ChatHoverWrapper>
   }
 
   @override
-  void dispose() { _anim.dispose(); super.dispose(); }
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
 
-  void _show() { _anim.forward(); }
+  void _show() {
+    _anim.forward();
+  }
+
   void _hide() {
     _anim.reverse().then((_) {
-      if (mounted) setState(() { _hovered = false; _showMob = false; });
+      if (mounted)
+        setState(() {
+          _hovered = false;
+          _showMob = false;
+        });
     });
+  }
+
+  void _openMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetCtx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          ListTile(
+            leading: const Icon(Icons.edit_outlined, color: C.primary),
+            title: const Text('Edit message',
+                style:
+                    TextStyle(fontWeight: FontWeight.w600, color: C.textDark)),
+            onTap: () {
+              Navigator.pop(sheetCtx);
+              widget.onEdit();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline_rounded, color: C.error),
+            title: const Text('Delete for everyone',
+                style: TextStyle(fontWeight: FontWeight.w600, color: C.error)),
+            onTap: () {
+              Navigator.pop(sheetCtx);
+              widget.onDelete();
+            },
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
   }
 
   @override
@@ -686,45 +769,62 @@ class _ChatHoverWrapperState extends State<_ChatHoverWrapper>
     if (widget.isDeleted) return widget.child;
     final show = _hovered || _showMob;
 
-    final btn = show
+    // Only the sender sees the actions button — never on the other person's
+    // messages. Tapping it opens a menu with exactly two options.
+    final btn = (show && widget.isMe)
         ? FadeTransition(
             opacity: _fade,
             child: GestureDetector(
-              onTap: () { _hide(); widget.onDelete(); },
+              onTap: () {
+                _hide();
+                _openMenu();
+              },
               child: Container(
-                width: 30, height: 30,
+                width: 30,
+                height: 30,
                 margin: EdgeInsets.only(
-                  left:  widget.isMe ? 6 : 0,
+                  left: widget.isMe ? 6 : 0,
                   right: widget.isMe ? 0 : 6,
                 ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.14),
-                    blurRadius: 6, offset: const Offset(0, 2),
-                  )],
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.14),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    )
+                  ],
                 ),
-                child: const Icon(Icons.delete_outline_rounded,
-                    size: 16, color: Color(0xFFC62828)),
+                child: const Icon(Icons.more_vert_rounded,
+                    size: 18, color: C.textMuted),
               ),
             ),
           )
         : null;
 
     return MouseRegion(
-      onEnter: (_) { setState(() => _hovered = true); _show(); },
-      onExit:  (_) => _hide(),
+      onEnter: (_) {
+        setState(() => _hovered = true);
+        _show();
+      },
+      onExit: (_) => _hide(),
       child: GestureDetector(
-        onLongPress: () { setState(() => _showMob = true); _show(); },
-        onTap:       () { if (_showMob) _hide(); },
+        onLongPress: () {
+          setState(() => _showMob = true);
+          _show();
+        },
+        onTap: () {
+          if (_showMob) _hide();
+        },
         child: Row(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             if (!widget.isMe && btn != null) btn,
             Flexible(child: widget.child),
-            if (widget.isMe  && btn != null) btn,
+            if (widget.isMe && btn != null) btn,
           ],
         ),
       ),
@@ -742,13 +842,13 @@ class _MsgBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final text      = msg['text']               as String? ?? '';
-    final imageUrl  = msg['imageUrl']           as String?;
-    final linkUrl   = msg['linkUrl']            as String?;
-    final audioUrl  = msg['audioUrl']           as String?;
-    final isDeleted = msg['deletedForEveryone'] as bool?   ?? false;
-    final isEdited  = msg['isEdited']           as bool?   ?? false;
-    final ts        = _fmt(msg['createdAt']     as String?);
+    final text = msg['text'] as String? ?? '';
+    final imageUrl = msg['imageUrl'] as String?;
+    final audioUrl = msg['audioUrl'] as String?;
+    final linkUrl = msg['linkUrl'] as String?;
+    final isDeleted = msg['deletedForEveryone'] as bool? ?? false;
+    final isEdited = msg['isEdited'] as bool? ?? false;
+    final ts = _fmt(msg['createdAt'] as String?);
 
     if (isDeleted) {
       return Container(
@@ -762,20 +862,30 @@ class _MsgBubble extends StatelessWidget {
           Icon(Icons.block_rounded, size: 14, color: C.textLight),
           SizedBox(width: 6),
           Text('This message was deleted',
-              style: TextStyle(fontSize: 13,
-                  color: C.textLight, fontStyle: FontStyle.italic)),
+              style: TextStyle(
+                  fontSize: 13,
+                  color: C.textLight,
+                  fontStyle: FontStyle.italic)),
         ]),
       );
     }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
-      constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.68),
+      constraints:
+          BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.68),
       child: Column(
         crossAxisAlignment:
             isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
+          if (audioUrl != null && audioUrl.isNotEmpty)
+            _VoiceMessage(
+              url: audioUrl.startsWith('http')
+                  ? audioUrl
+                  : 'http://localhost:5000$audioUrl',
+              isMe: isMe,
+              durationSecs: (msg['audioDuration'] as num?)?.toInt() ?? 0,
+            ),
           if (imageUrl != null && imageUrl.isNotEmpty)
             ClipRRect(
               borderRadius: BorderRadius.circular(14),
@@ -783,67 +893,73 @@ class _MsgBubble extends StatelessWidget {
                 imageUrl.startsWith('http')
                     ? imageUrl
                     : 'http://localhost:5000$imageUrl',
-                width: 220, fit: BoxFit.cover,
+                width: 220,
+                fit: BoxFit.cover,
                 loadingBuilder: (_, child, prog) => prog == null
                     ? child
-                    : const SizedBox(width: 220, height: 140,
-                        child: Center(child: CircularProgressIndicator(
-                            color: C.primary, strokeWidth: 2))),
+                    : const SizedBox(
+                        width: 220,
+                        height: 140,
+                        child: Center(
+                            child: CircularProgressIndicator(
+                                color: C.primary, strokeWidth: 2))),
                 errorBuilder: (_, __, ___) => Container(
-                    width: 220, height: 80, color: C.primaryLight,
-                    child: const Center(child: Icon(
-                        Icons.broken_image_outlined, color: C.textLight))),
+                    width: 220,
+                    height: 80,
+                    color: C.primaryLight,
+                    child: const Center(
+                        child: Icon(Icons.broken_image_outlined,
+                            color: C.textLight))),
               ),
             ),
-          // Audio bubble
-          if (audioUrl != null && audioUrl.isNotEmpty) ...[
-            _AudioBubble(
-              url: audioUrl.startsWith('http') ? audioUrl : 'http://localhost:5000$audioUrl',
-              isMe: isMe,
-            ),
-          ] else if (linkUrl != null && linkUrl.isNotEmpty)
+          if (linkUrl != null && linkUrl.isNotEmpty)
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: isMe ? C.primary : Colors.white,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                    color: isMe ? Colors.transparent : C.border),
+                border: Border.all(color: isMe ? Colors.transparent : C.border),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.link_rounded, size: 16,
-                    color: isMe ? Colors.white70 : C.primary),
+                Icon(Icons.link_rounded,
+                    size: 16, color: isMe ? Colors.white70 : C.primary),
                 const SizedBox(width: 8),
-                Expanded(child: Text(linkUrl,
-                    style: TextStyle(fontSize: 13,
-                        color: isMe ? Colors.white : C.primary,
-                        decoration: TextDecoration.underline),
-                    maxLines: 2, overflow: TextOverflow.ellipsis)),
+                Expanded(
+                    child: Text(linkUrl,
+                        style: TextStyle(
+                            fontSize: 13,
+                            color: isMe ? Colors.white : C.primary,
+                            decoration: TextDecoration.underline),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis)),
               ]),
             ),
-          if (text.isNotEmpty && (audioUrl == null || audioUrl.isEmpty))
+          if (text.isNotEmpty)
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 gradient: isMe
-                    ? const LinearGradient(
-                        colors: [C.primaryDark, C.primary])
+                    ? const LinearGradient(colors: [C.primaryDark, C.primary])
                     : null,
                 color: isMe ? null : Colors.white,
                 borderRadius: BorderRadius.only(
-                  topLeft:     const Radius.circular(18),
-                  topRight:    const Radius.circular(18),
-                  bottomLeft:  Radius.circular(isMe ? 18 : 4),
+                  topLeft: const Radius.circular(18),
+                  topRight: const Radius.circular(18),
+                  bottomLeft: Radius.circular(isMe ? 18 : 4),
                   bottomRight: Radius.circular(isMe ? 4 : 18),
                 ),
                 border: isMe ? null : Border.all(color: C.border),
-                boxShadow: [BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 4, offset: const Offset(0, 2))],
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2))
+                ],
               ),
               child: Text(text,
-                  style: TextStyle(fontSize: 14, height: 1.4,
+                  style: TextStyle(
+                      fontSize: 14,
+                      height: 1.4,
                       color: isMe ? Colors.white : C.textDark)),
             ),
           Padding(
@@ -851,11 +967,12 @@ class _MsgBubble extends StatelessWidget {
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               if (isEdited)
                 const Text('edited · ',
-                    style: TextStyle(fontSize: 10, color: C.textLight,
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: C.textLight,
                         fontStyle: FontStyle.italic)),
               Text(ts,
-                  style: const TextStyle(
-                      fontSize: 10, color: C.textLight)),
+                  style: const TextStyle(fontSize: 10, color: C.textLight)),
             ]),
           ),
         ],
@@ -867,10 +984,12 @@ class _MsgBubble extends StatelessWidget {
     if (raw == null) return '';
     try {
       final dt = DateTime.parse(raw).toLocal();
-      final h  = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-      final m  = dt.minute.toString().padLeft(2, '0');
+      final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+      final m = dt.minute.toString().padLeft(2, '0');
       return '$h:$m ${dt.hour >= 12 ? 'PM' : 'AM'}';
-    } catch (_) { return ''; }
+    } catch (_) {
+      return '';
+    }
   }
 }
 
@@ -885,11 +1004,14 @@ class _DateDivider extends StatelessWidget {
     String label = 'Today';
     if (ts != null) {
       try {
-        final dt   = DateTime.parse(ts!).toLocal();
+        final dt = DateTime.parse(ts!).toLocal();
         final diff = DateTime.now().difference(dt).inDays;
-        if (diff == 0)      label = 'Today';
-        else if (diff == 1) label = 'Yesterday';
-        else                label = '${dt.day}/${dt.month}/${dt.year}';
+        if (diff == 0)
+          label = 'Today';
+        else if (diff == 1)
+          label = 'Yesterday';
+        else
+          label = '${dt.day}/${dt.month}/${dt.year}';
       } catch (_) {}
     }
     return Padding(
@@ -899,8 +1021,10 @@ class _DateDivider extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Text(label,
-              style: const TextStyle(fontSize: 11,
-                  color: C.textLight, fontWeight: FontWeight.w600)),
+              style: const TextStyle(
+                  fontSize: 11,
+                  color: C.textLight,
+                  fontWeight: FontWeight.w600)),
         ),
         const Expanded(child: Divider(color: C.border)),
       ]),
@@ -908,167 +1032,151 @@ class _DateDivider extends StatelessWidget {
   }
 }
 
-
-// ══════════════════════════════════════════════════════════════
-//  Hover trash wrapper (web hover + mobile long-press)
-// ══════════════════════════════════════════════════════════════
-// ══════════════════════════════════════════════════════════════
-//  Audio Bubble — plays voice messages inline
-// ══════════════════════════════════════════════════════════════
-class _AudioBubble extends StatefulWidget {
-  final String url;
-  final bool   isMe;
-  const _AudioBubble({required this.url, required this.isMe});
-  @override
-  State<_AudioBubble> createState() => _AudioBubbleState();
-}
-
-class _AudioBubbleState extends State<_AudioBubble> {
-  html.AudioElement? _audio;
-  bool   _playing  = false;
-  double _progress = 0.0;
-  double _duration = 0.0;
-  Timer? _ticker;
-
-  @override
-  void initState() {
-    super.initState();
-    _audio = html.AudioElement()
-      ..src = widget.url
-      ..preload = 'metadata';
-    // Append to DOM — required for browser audio pipeline in Flutter web
-    html.document.body!.append(_audio!);
-    _audio!.onLoadedMetadata.listen((_) {
-      if (mounted) setState(() => _duration = (_audio!.duration as num).toDouble());
-    });
-    _audio!.onEnded.listen((_) {
-      _ticker?.cancel();
-      if (mounted) setState(() { _playing = false; _progress = 0.0; });
-    });
-  }
-
-  @override
-  void dispose() {
-    _ticker?.cancel();
-    _audio?.pause();
-    _audio?.remove();
-    _audio = null;
-    super.dispose();
-  }
-
-  void _toggle() {
-    if (_audio == null) return;
-    if (_playing) {
-      _audio!.pause();
-      _ticker?.cancel();
-      setState(() => _playing = false);
-    } else {
-      _audio!.play();
-      // Poll every 80ms — most reliable approach for Flutter web
-      _ticker = Timer.periodic(const Duration(milliseconds: 80), (_) {
-        if (!mounted) { _ticker?.cancel(); return; }
-        if (_duration > 0) {
-          final t = (_audio!.currentTime as num).toDouble();
-          if (t != (_progress * _duration)) {
-            setState(() => _progress = (t / _duration).clamp(0.0, 1.0));
-          }
-        }
-      });
-      setState(() => _playing = true);
-    }
-  }
-
-  String _fmt(double s) {
-    if (!s.isFinite || s <= 0) return '0:00';
-    final t = s.toInt();
-    return '${(t ~/ 60)}:${(t % 60).toString().padLeft(2, "0")}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bg    = widget.isMe ? C.primary : Colors.white;
-    final muted = widget.isMe
-        ? Colors.white.withValues(alpha: 0.6)
-        : C.textMuted;
-
-    return Container(
-      width: 220,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(16),
-        border: widget.isMe ? null : Border.all(color: C.border),
-      ),
-      child: Row(children: [
-        GestureDetector(
-          onTap: _toggle,
-          child: Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(
-              color: widget.isMe
-                  ? Colors.white.withValues(alpha: 0.25)
-                  : C.primaryLight,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(_playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                color: widget.isMe ? Colors.white : C.primary, size: 22),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 2.5,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-              activeTrackColor:   widget.isMe ? Colors.white : C.primary,
-              inactiveTrackColor: muted,
-              thumbColor:         widget.isMe ? Colors.white : C.primary,
-              overlayColor: (widget.isMe ? Colors.white : C.primary).withValues(alpha: 0.2),
-            ),
-            child: Slider(
-              value: _progress.clamp(0.0, 1.0),
-              onChanged: (v) {
-                if (_audio == null || _duration <= 0) return;
-                _audio!.currentTime = v * _duration;
-                setState(() => _progress = v);
-              },
-            ),
-          ),
-          Row(children: [
-            Icon(Icons.mic_rounded, size: 11, color: muted),
-            const SizedBox(width: 3),
-            Text(
-              _playing
-                  ? _fmt((_audio!.currentTime as num).toDouble())
-                  : _fmt(_duration),
-              style: TextStyle(fontSize: 10, color: muted),
-            ),
-          ]),
-        ])),
-      ]),
-    );
-  }
-}
-
-
 class _EmptyChat extends StatelessWidget {
   final String ownerName;
   const _EmptyChat({required this.ownerName});
   @override
   Widget build(BuildContext context) => Center(
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Container(width: 80, height: 80,
-          decoration: BoxDecoration(color: C.primaryLight, shape: BoxShape.circle),
-          child: const Icon(Icons.chat_bubble_outline_rounded,
-              size: 36, color: C.primary)),
-      const SizedBox(height: 16),
-      Text('Say hi to $ownerName!',
-          style: const TextStyle(fontSize: 17,
-              fontWeight: FontWeight.w800, color: C.textDark)),
-      const SizedBox(height: 6),
-      const Text('Ask about the plot or schedule a visit',
-          style: TextStyle(color: C.textMuted, fontSize: 13)),
-    ]),
-  );
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Container(
+              width: 80,
+              height: 80,
+              decoration:
+                  BoxDecoration(color: C.primaryLight, shape: BoxShape.circle),
+              child: const Icon(Icons.chat_bubble_outline_rounded,
+                  size: 36, color: C.primary)),
+          const SizedBox(height: 16),
+          Text('Say hi to $ownerName!',
+              style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: C.textDark)),
+          const SizedBox(height: 6),
+          const Text('Ask about the plot or schedule a visit',
+              style: TextStyle(color: C.textMuted, fontSize: 13)),
+        ]),
+      );
+}
+
+// ── Voice message player ─────────────────────────────────────
+class _VoiceMessage extends StatefulWidget {
+  final String url;
+  final bool isMe;
+  final int durationSecs;
+  const _VoiceMessage(
+      {required this.url, required this.isMe, this.durationSecs = 0});
+  @override
+  State<_VoiceMessage> createState() => _VoiceMessageState();
+}
+
+class _VoiceMessageState extends State<_VoiceMessage> {
+  final AudioPlayer _player = AudioPlayer();
+  bool _playing = false;
+  Duration _dur = Duration.zero;
+  Duration _pos = Duration.zero;
+  final List<StreamSubscription> _subs = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _subs.add(_player.onPlayerStateChanged.listen((s) {
+      if (mounted) setState(() => _playing = s == PlayerState.playing);
+    }));
+    _subs.add(_player.onDurationChanged.listen((d) {
+      if (mounted) setState(() => _dur = d);
+    }));
+    _subs.add(_player.onPositionChanged.listen((p) {
+      if (mounted) setState(() => _pos = p);
+    }));
+    _subs.add(_player.onPlayerComplete.listen((_) {
+      if (mounted)
+        setState(() {
+          _playing = false;
+          _pos = Duration.zero;
+        });
+    }));
+  }
+
+  @override
+  void dispose() {
+    for (final s in _subs) {
+      s.cancel();
+    }
+    _player.dispose();
+    super.dispose();
+  }
+
+  Future<void> _toggle() async {
+    if (_playing) {
+      await _player.pause();
+    } else {
+      await _player.play(UrlSource(widget.url));
+    }
+  }
+
+  String _fmt(Duration d) {
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '${d.inMinutes}:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = widget.isMe ? Colors.white : C.primary;
+    final bg = widget.isMe ? C.primary : Colors.white;
+    // Prefer the player's reported duration; fall back to the stored recording
+    // duration (recorded WebM often reports no duration in the browser).
+    final totalMs = _dur.inMilliseconds > 0
+        ? _dur.inMilliseconds
+        : widget.durationSecs * 1000;
+    final progress =
+        totalMs > 0 ? (_pos.inMilliseconds / totalMs).clamp(0.0, 1.0) : 0.0;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      width: 220,
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: widget.isMe ? Colors.transparent : C.border),
+      ),
+      child: Row(children: [
+        GestureDetector(
+          onTap: _toggle,
+          child: Icon(
+              _playing ? Icons.pause_circle_filled : Icons.play_circle_fill,
+              size: 34,
+              color: fg),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 4,
+                backgroundColor: fg.withValues(alpha: 0.25),
+                valueColor: AlwaysStoppedAnimation(fg),
+              ),
+            ),
+            const SizedBox(height: 5),
+            Row(children: [
+              Icon(Icons.mic_rounded,
+                  size: 13, color: fg.withValues(alpha: 0.8)),
+              const SizedBox(width: 4),
+              Text(
+                  _pos > Duration.zero
+                      ? _fmt(_pos)
+                      : (totalMs > 0
+                          ? _fmt(Duration(milliseconds: totalMs))
+                          : 'Voice message'),
+                  style: TextStyle(
+                      fontSize: 11, color: fg.withValues(alpha: 0.9))),
+            ]),
+          ]),
+        ),
+      ]),
+    );
+  }
 }

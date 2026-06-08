@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
@@ -8,8 +7,6 @@ import 'chat_list_screen.dart';
 import 'wishlist_screen.dart';
 import 'profile_screen.dart';
 import 'login_screen.dart';
-import 'call_screen.dart';
-import '../services/socket_service.dart';
 
 class MainShell extends StatefulWidget {
   final int initialIndex;
@@ -28,36 +25,6 @@ class _MainShellState extends State<MainShell> {
     super.initState();
     _index = widget.initialIndex;
     _checkAuth();
-    _initSocket();
-  }
-
-  Future<void> _initSocket() async {
-    final token = await Api.getToken();
-    if (token == null) return;
-    try {
-      final parts   = token.split('.');
-      if (parts.length < 2) return;
-      final payload = parts[1];
-      final padded  = payload.padRight((payload.length + 3) & ~3, '=');
-      final decoded = json.decode(utf8.decode(base64Url.decode(padded)));
-      final myId    = decoded['id'] as String? ?? '';
-      SocketService().register(myId, 'customer');
-      SocketService().onIncomingCall = (data) => _showIncomingCall(data, myId);
-    } catch (e) { debugPrint('Socket init error: $e'); }
-  }
-
-  void _showIncomingCall(Map<String, dynamic> data, String myId) {
-    if (!mounted) return;
-    Navigator.push(context, MaterialPageRoute(builder: (_) => CallScreen(
-      myId:          myId,
-      myType:        'customer',
-      myName:        '',
-      peerId:        data['fromUserId']   as String? ?? '',
-      peerType:      data['fromUserType'] as String? ?? 'owner',
-      peerName:      data['fromName']     as String? ?? 'Owner',
-      isOutgoing:    false,
-      incomingOffer: Map<String, dynamic>.from(data['offer'] as Map? ?? {}),
-    )));
   }
 
   Future<void> _checkAuth() async {

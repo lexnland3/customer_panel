@@ -60,7 +60,6 @@ class _ChatListTabState extends State<ChatListTab> {
                           builder: (_) => ChatScreen(
                             chatId:    c['_id']  as String,
                             ownerName: (c['owner'] as Map?)? ['name'] as String? ?? 'Owner',
-                            ownerId:   (c['owner'] as Map?)? ['_id']  as String? ?? '',
                             plotName:  (c['property'] as Map?)? ['propertyName'] as String? ?? 'Plot',
                           ),
                         ));

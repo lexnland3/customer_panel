@@ -60,12 +60,14 @@ class Api {
     final res = await http.post(
       Uri.parse('$base/customers/register'),
       headers: await _headers(auth: false),
-      body: jsonEncode({'name': name, 'email': email, 'phone': phone, 'password': password}),
+      body: jsonEncode(
+          {'name': name, 'email': email, 'phone': phone, 'password': password}),
     );
     final data = _handle(res);
     if (data['token'] != null) {
       await saveToken(data['token'] as String);
-      if (data['customer'] != null) await saveUser(data['customer'] as Map<String, dynamic>);
+      if (data['customer'] != null)
+        await saveUser(data['customer'] as Map<String, dynamic>);
     }
     return data;
   }
@@ -82,7 +84,8 @@ class Api {
     final data = _handle(res);
     if (data['token'] != null) {
       await saveToken(data['token'] as String);
-      if (data['customer'] != null) await saveUser(data['customer'] as Map<String, dynamic>);
+      if (data['customer'] != null)
+        await saveUser(data['customer'] as Map<String, dynamic>);
     }
     return data;
   }
@@ -96,7 +99,8 @@ class Api {
     final data = _handle(res);
     if (data['token'] != null) {
       await saveToken(data['token'] as String);
-      if (data['customer'] != null) await saveUser(data['customer'] as Map<String, dynamic>);
+      if (data['customer'] != null)
+        await saveUser(data['customer'] as Map<String, dynamic>);
     }
     return data;
   }
@@ -119,13 +123,14 @@ class Api {
     int page = 1,
   }) async {
     final params = <String, String>{'page': '$page', 'limit': '10'};
-    if (search   != null && search.isNotEmpty)  params['search']   = search;
-    if (facing   != null && facing != 'Any')    params['facing']   = facing;
-    if (plotType != null && plotType != 'Any')  params['plotType'] = plotType;
-    if (minPrice != null)                       params['minPrice'] = '$minPrice';
-    if (maxPrice != null)                       params['maxPrice'] = '$maxPrice';
+    if (search != null && search.isNotEmpty) params['search'] = search;
+    if (facing != null && facing != 'Any') params['facing'] = facing;
+    if (plotType != null && plotType != 'Any') params['plotType'] = plotType;
+    if (minPrice != null) params['minPrice'] = '$minPrice';
+    if (maxPrice != null) params['maxPrice'] = '$maxPrice';
 
-    final uri = Uri.parse('$base/customers/plots').replace(queryParameters: params);
+    final uri =
+        Uri.parse('$base/customers/plots').replace(queryParameters: params);
     final res = await http.get(uri, headers: await _headers(auth: false));
     return _handle(res);
   }
@@ -149,14 +154,14 @@ class Api {
   }) async {
     final res = await http.post(
       Uri.parse('$base/customers/visits'),
-      headers: await _headers(),
+      headers: await _headers(auth: false),
       body: jsonEncode({
-        'propertyId':   plotId,
-        'visitorName':  visitorName,
+        'propertyId': plotId,
+        'visitorName': visitorName,
         'visitorPhone': visitorPhone,
-        'visitDate':    visitDate,
-        'visitTime':    visitTime,
-        'requirement':  requirement,
+        'visitDate': visitDate,
+        'visitTime': visitTime,
+        'requirement': requirement,
       }),
     );
     return _handle(res);
@@ -193,6 +198,15 @@ class Api {
     return _handle(res);
   }
 
+  static Future<Map<String, dynamic>> submitProblem(String message) async {
+    final res = await http.post(
+      Uri.parse('$base/customers/support'),
+      headers: await _headers(),
+      body: jsonEncode({'message': message}),
+    );
+    return _handle(res);
+  }
+
   static Future<Map<String, dynamic>> sendMessage({
     required String chatId,
     required String text,
@@ -205,7 +219,7 @@ class Api {
       body: jsonEncode({
         'text': text,
         if (imageUrl != null) 'imageUrl': imageUrl,
-        if (linkUrl  != null) 'linkUrl':  linkUrl,
+        if (linkUrl != null) 'linkUrl': linkUrl,
       }),
     );
     return _handle(res);
@@ -223,66 +237,56 @@ class Api {
 
   // ── VISITS ─────────────────────────────────────────────────
   static Future<Map<String, dynamic>> getMyVisits() async {
-    final res = await http.get(Uri.parse('$base/customers/visits'), headers: await _headers());
-    return _handle(res);
-  }
-
-  static Future<Map<String, dynamic>> uploadChatAudio({
-    required String chatId,
-    required List<int> bytes,
-    required String fileName,
-  }) async {
-    final uri = Uri.parse('$base/customers/chats/$chatId/upload-audio');
-    final req  = http.MultipartRequest('POST', uri);
-    req.headers.addAll(await _headers());
-    req.files.add(http.MultipartFile.fromBytes('audio', bytes,
-        filename: fileName,
-        contentType: MediaType('audio', 'webm')));
-    final streamed = await req.send();
-    final res      = await http.Response.fromStream(streamed);
+    final res = await http.get(Uri.parse('$base/customers/visits'),
+        headers: await _headers());
     return _handle(res);
   }
 
   static Future<Map<String, dynamic>> cancelVisit(String id) async {
-    final res = await http.patch(Uri.parse('$base/customers/visits/$id/cancel'), headers: await _headers());
-    return _handle(res);
-  }
-
-  // Customer edits visit date/time directly (sends updated card to chat, resets to pending)
-  static Future<Map<String, dynamic>> editVisit(
-    String id, {
-    required String visitDate,
-    required String visitTime,
-  }) async {
-    final res = await http.patch(
-      Uri.parse('$base/customers/visits/$id/edit'),
-      headers: await _headers(),
-      body: jsonEncode({'visitDate': visitDate, 'visitTime': visitTime}),
-    );
-    return _handle(res);
-  }
-
-  // Customer accepts owner's edit
-  static Future<Map<String, dynamic>> acceptVisit(String id) async {
-    final res = await http.patch(
-      Uri.parse('$base/customers/visits/$id/accept'),
-      headers: await _headers(),
-    );
+    final res = await http.patch(Uri.parse('$base/customers/visits/$id/cancel'),
+        headers: await _headers());
     return _handle(res);
   }
 
   // ── MESSAGE ACTIONS ──────────────────────────────────────
+  static Future<Map<String, dynamic>> uploadChatAudio({
+    required String chatId,
+    required List<int> bytes,
+    required String fileName,
+    int duration = 0,
+  }) async {
+    final token = await getToken();
+    final request = http.MultipartRequest(
+        'POST', Uri.parse('$base/customers/chats/$chatId/audio'));
+    if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    request.fields['duration'] = duration.toString();
+    request.files.add(http.MultipartFile.fromBytes('audio', bytes,
+        filename: fileName, contentType: MediaType('audio', 'webm')));
+    final streamed = await request.send();
+    final res = await http.Response.fromStream(streamed);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode >= 200 && res.statusCode < 300) return body;
+    throw Exception(body['message'] ?? 'Voice upload failed');
+  }
+
   static Future<Map<String, dynamic>> uploadChatPhoto({
     required String chatId,
     required List<int> bytes,
     required String fileName,
   }) async {
-    final token   = await getToken();
+    final token = await getToken();
     final request = http.MultipartRequest(
         'POST', Uri.parse('$base/customers/chats/$chatId/upload'));
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    final ext =
+        fileName.contains('.') ? fileName.split('.').last.toLowerCase() : 'jpg';
+    final mime = ext == 'png'
+        ? 'image/png'
+        : ext == 'webp'
+            ? 'image/webp'
+            : 'image/jpeg';
     request.files.add(http.MultipartFile.fromBytes('photo', bytes,
-        filename: fileName));
+        filename: fileName, contentType: MediaType.parse(mime)));
     final streamed = await request.send();
     final res = await http.Response.fromStream(streamed);
     return _handle(res);
@@ -306,8 +310,8 @@ class Api {
     required String msgId,
     required String scope, // 'me' or 'everyone'
   }) async {
-    final req = http.Request('DELETE',
-        Uri.parse('$base/customers/chats/$chatId/messages/$msgId'));
+    final req = http.Request(
+        'DELETE', Uri.parse('$base/customers/chats/$chatId/messages/$msgId'));
     req.headers.addAll(await _headers());
     req.body = jsonEncode({'scope': scope});
     final streamed = await req.send();
@@ -315,32 +319,36 @@ class Api {
     return _handle(res);
   }
 
-
   // ── FAVOURITES ────────────────────────────────────────────
   static Future<Map<String, dynamic>> getFavourites() async {
-    final res = await http.get(Uri.parse('$base/customers/favourites'), headers: await _headers());
+    final res = await http.get(Uri.parse('$base/customers/favourites'),
+        headers: await _headers());
     return _handle(res);
   }
 
   static Future<Map<String, dynamic>> getFavouriteIds() async {
-    final res = await http.get(Uri.parse('$base/customers/favourites/ids'), headers: await _headers());
+    final res = await http.get(Uri.parse('$base/customers/favourites/ids'),
+        headers: await _headers());
     return _handle(res);
   }
 
   static Future<Map<String, dynamic>> addFavourite(String plotId) async {
-    final res = await http.post(Uri.parse('$base/customers/favourites/$plotId'), headers: await _headers());
+    final res = await http.post(Uri.parse('$base/customers/favourites/$plotId'),
+        headers: await _headers());
     return _handle(res);
   }
 
   static Future<Map<String, dynamic>> removeFavourite(String plotId) async {
-    final req = http.Request('DELETE', Uri.parse('$base/customers/favourites/$plotId'));
+    final req =
+        http.Request('DELETE', Uri.parse('$base/customers/favourites/$plotId'));
     req.headers.addAll(await _headers());
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
     return _handle(res);
   }
 
-  static Future<Map<String, dynamic>> toggleFavourite(String plotId, bool currentlyFav) async {
+  static Future<Map<String, dynamic>> toggleFavourite(
+      String plotId, bool currentlyFav) async {
     if (currentlyFav) return removeFavourite(plotId);
     return addFavourite(plotId);
   }
