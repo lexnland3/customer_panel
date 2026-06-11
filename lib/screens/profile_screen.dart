@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import 'login_screen.dart';
+import 'edit_profile_screen.dart';
 
 class ProfileTab extends StatefulWidget {
   const ProfileTab({super.key});
@@ -19,6 +20,15 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   Future<void> _load() async {
+    // Refresh from server so newly-saved profile fields show immediately.
+    try {
+      final res = await Api.getMe();
+      final c = res['customer'] as Map<String, dynamic>?;
+      if (c != null) {
+        if (mounted) setState(() => _user = c);
+        return;
+      }
+    } catch (_) {}
     final u = await Api.getUser();
     if (mounted) setState(() => _user = u);
   }
@@ -34,6 +44,13 @@ class _ProfileTabState extends State<ProfileTab> {
               ? _GuestView()
               : _UserView(
                   user: _user!,
+                  onEdit: () async {
+                    final changed = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => EditProfileScreen(user: _user!)));
+                    if (changed == true) _load();
+                  },
                   onLogout: () async {
                     await Api.logout();
                     if (context.mounted)
@@ -82,7 +99,24 @@ class _GuestView extends StatelessWidget {
 class _UserView extends StatelessWidget {
   final Map<String, dynamic> user;
   final VoidCallback onLogout;
-  const _UserView({required this.user, required this.onLogout});
+  final VoidCallback onEdit;
+  const _UserView(
+      {required this.user, required this.onLogout, required this.onEdit});
+
+  bool get _incomplete =>
+      user['age'] == null ||
+      ((user['gender'] ?? '') as String).isEmpty ||
+      ((user['occupation'] ?? '') as String).isEmpty ||
+      ((user['state'] ?? '') as String).isEmpty ||
+      ((user['city'] ?? '') as String).isEmpty;
+
+  String _ageText() {
+    final a = user['age'];
+    return a == null ? '—' : a.toString();
+  }
+
+  String _cap(String s) =>
+      s.isEmpty ? '—' : s[0].toUpperCase() + s.substring(1);
 
   @override
   Widget build(BuildContext context) => Column(children: [
@@ -128,9 +162,46 @@ class _UserView extends StatelessWidget {
                             fontSize: 12,
                             color: Colors.white.withValues(alpha: 0.7))),
                 ])),
+            IconButton(
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined, color: Colors.white),
+              tooltip: 'Edit profile',
+            ),
           ]),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
+
+        // ── Incomplete profile prompt ──
+        if (_incomplete)
+          GestureDetector(
+            onTap: onEdit,
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3E0),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFFFB74D)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.info_outline_rounded,
+                    color: Color(0xFFE65100), size: 22),
+                const SizedBox(width: 10),
+                const Expanded(
+                    child: Text(
+                  'Complete your profile to get plots near you and better recommendations.',
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      color: Color(0xFFE65100),
+                      fontWeight: FontWeight.w600),
+                )),
+                const Text('Update',
+                    style: TextStyle(
+                        color: Color(0xFFE65100), fontWeight: FontWeight.w800)),
+              ]),
+            ),
+          ),
+        if (_incomplete) const SizedBox(height: 16),
+
         _InfoTile(
             icon: Icons.email_outlined,
             label: 'Email',
@@ -138,7 +209,25 @@ class _UserView extends StatelessWidget {
         _InfoTile(
             icon: Icons.phone_outlined,
             label: 'Phone',
-            value: user['phone'] ?? '—'),
+            value:
+                (user['phone'] ?? '').toString().isEmpty ? '—' : user['phone']),
+        _InfoTile(
+            icon: Icons.location_city_rounded,
+            label: 'City',
+            value: _cap((user['city'] ?? '') as String)),
+        _InfoTile(
+            icon: Icons.map_outlined,
+            label: 'State',
+            value: _cap((user['state'] ?? '') as String)),
+        _InfoTile(icon: Icons.cake_outlined, label: 'Age', value: _ageText()),
+        _InfoTile(
+            icon: Icons.person_outline,
+            label: 'Gender',
+            value: _cap((user['gender'] ?? '') as String)),
+        _InfoTile(
+            icon: Icons.work_outline,
+            label: 'Occupation',
+            value: _cap((user['occupation'] ?? '') as String)),
         const SizedBox(height: 16),
         const _SupportSection(),
         const SizedBox(height: 24),

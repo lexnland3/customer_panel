@@ -56,12 +56,20 @@ class Api {
     required String email,
     required String phone,
     required String password,
+    String state = '',
+    String city = '',
   }) async {
     final res = await http.post(
       Uri.parse('$base/customers/register'),
       headers: await _headers(auth: false),
-      body: jsonEncode(
-          {'name': name, 'email': email, 'phone': phone, 'password': password}),
+      body: jsonEncode({
+        'name': name,
+        'email': email,
+        'phone': phone,
+        'password': password,
+        'state': state,
+        'city': city
+      }),
     );
     final data = _handle(res);
     if (data['token'] != null) {
@@ -110,7 +118,36 @@ class Api {
       Uri.parse('$base/customers/me'),
       headers: await _headers(),
     );
-    return _handle(res);
+    final out = _handle(res);
+    if (out['customer'] != null)
+      await saveUser(out['customer'] as Map<String, dynamic>);
+    return out;
+  }
+
+  static Future<Map<String, dynamic>> updateProfile(
+      Map<String, dynamic> data) async {
+    final res = await http.patch(
+      Uri.parse('$base/customers/me'),
+      headers: await _headers(),
+      body: jsonEncode(data),
+    );
+    final out = _handle(res);
+    if (out['customer'] != null)
+      await saveUser(out['customer'] as Map<String, dynamic>);
+    return out;
+  }
+
+  static Future<List<String>> searchCities(String state, String query) async {
+    if (state.isEmpty) return [];
+    final uri = Uri.parse('$base/locations/cities')
+        .replace(queryParameters: {'state': state, 'search': query});
+    try {
+      final res = await http.get(uri, headers: await _headers(auth: false));
+      final data = _handle(res);
+      return (data['cities'] as List? ?? []).map((e) => e.toString()).toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   // ── PLOTS ─────────────────────────────────────────────────────

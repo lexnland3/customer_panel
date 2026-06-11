@@ -28,6 +28,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool _sending = false;
   bool _uploading = false;
+  String _uploadLabel = 'Uploading…';
   bool _loading = true;
   String? _blocked;
   String? _lastTs;
@@ -67,7 +68,11 @@ class _ChatScreenState extends State<ChatScreen> {
       if (path == null) return;
       try {
         final bytes = await XFile(path).readAsBytes();
-        if (mounted) setState(() => _uploading = true);
+        if (mounted)
+          setState(() {
+            _uploading = true;
+            _uploadLabel = 'Processing audio…';
+          });
         final res = await Api.uploadChatAudio(
             chatId: widget.chatId,
             bytes: bytes,
@@ -219,7 +224,10 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    setState(() => _uploading = true);
+    setState(() {
+      _uploading = true;
+      _uploadLabel = 'Uploading photo…';
+    });
     try {
       final res = await Api.uploadChatPhoto(
           chatId: widget.chatId, bytes: bytes, fileName: name);
@@ -436,21 +444,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
       body: Column(children: [
-        // Info banner
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-          color: C.primaryLight,
-          child: const Row(children: [
-            Icon(Icons.info_outline_rounded, size: 14, color: C.primary),
-            SizedBox(width: 8),
-            Expanded(
-                child: Text(
-              'Phone numbers are blocked. Share text, images and links safely.',
-              style: TextStyle(fontSize: 11, color: C.primary, height: 1.3),
-            )),
-          ]),
-        ),
-
         // Messages
         Expanded(
           child: _loading
@@ -499,15 +492,15 @@ class _ChatScreenState extends State<ChatScreen> {
           Container(
             color: C.primaryLight,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: const Row(children: [
-              SizedBox(
+            child: Row(children: [
+              const SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
                       color: C.primary, strokeWidth: 2)),
-              SizedBox(width: 10),
-              Text('Uploading photo…',
-                  style: TextStyle(
+              const SizedBox(width: 10),
+              Text(_uploadLabel,
+                  style: const TextStyle(
                       fontSize: 13,
                       color: C.primary,
                       fontWeight: FontWeight.w600)),
