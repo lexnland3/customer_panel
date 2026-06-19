@@ -15,7 +15,7 @@ class Api {
   // ════════════════════════════════════════════════════════════════
   static const base = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:5000/api',
+    defaultValue: 'https://owner-panel-backend.onrender.com/api',
   );
 
   /// Backend origin without the trailing "/api". Used to turn relative media
