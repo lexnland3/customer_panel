@@ -109,8 +109,13 @@ class _SplashScreenState extends State<SplashScreen>
                             color: Colors.white.withValues(alpha: 0.3),
                             width: 2),
                       ),
-                      child: const Center(
-                        child: Text('🌿', style: TextStyle(fontSize: 56)),
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(26),
+                          child: Image.asset(
+                              'assets/images/logo_small_white.png',
+                              fit: BoxFit.contain),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 24),

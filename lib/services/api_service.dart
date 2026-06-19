@@ -4,7 +4,29 @@ import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class Api {
-  static const base = 'http://localhost:5000/api';
+  // Pass --dart-define=API_BASE_URL=http://<pc-lan-ip>:5000/api when testing
+  // on a real phone, or your Render https URL once deployed.
+  // ════════════════════════════════════════════════════════════════
+  //  >>> SET YOUR BACKEND URL HERE before building the release APK <<<
+  //  Must END WITH /api, e.g.  https://lexnland-backend.onrender.com/api
+  //  Leave localhost for your own emulator/web testing.
+  //  You can also override without editing:
+  //    flutter build apk --release --dart-define=API_BASE_URL=https://.../api
+  // ════════════════════════════════════════════════════════════════
+  static const base = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://localhost:5000/api',
+  );
+
+  /// Backend origin without the trailing "/api". Used to turn relative media
+  /// paths from the server (e.g. "/uploads/photos/x.jpg") into full URLs.
+  /// Full Cloudinary URLs already start with http and are used as-is.
+  static String get mediaBase {
+    var b = base;
+    if (b.endsWith('/')) b = b.substring(0, b.length - 1);
+    if (b.endsWith('/api')) b = b.substring(0, b.length - 4);
+    return b;
+  }
 
   // ── Prefs helpers ─────────────────────────────────────────────
   static Future<String?> getToken() async {
@@ -157,6 +179,8 @@ class Api {
     String? plotType,
     int? minPrice,
     int? maxPrice,
+    String? state,
+    String? city,
     int page = 1,
   }) async {
     final params = <String, String>{'page': '$page', 'limit': '10'};
@@ -165,6 +189,8 @@ class Api {
     if (plotType != null && plotType != 'Any') params['plotType'] = plotType;
     if (minPrice != null) params['minPrice'] = '$minPrice';
     if (maxPrice != null) params['maxPrice'] = '$maxPrice';
+    if (state != null && state.isNotEmpty) params['state'] = state;
+    if (city != null && city.isNotEmpty) params['city'] = city;
 
     final uri =
         Uri.parse('$base/customers/plots').replace(queryParameters: params);
@@ -180,6 +206,24 @@ class Api {
     return _handle(res);
   }
 
+  // ── Ratings ──────────────────────────────────────────────
+  static Future<Map<String, dynamic>> ratePlot(String id, int rating) async {
+    final res = await http.post(
+      Uri.parse('$base/customers/plots/$id/rate'),
+      headers: await _headers(),
+      body: jsonEncode({'rating': rating}),
+    );
+    return _handle(res);
+  }
+
+  static Future<Map<String, dynamic>> myPlotRating(String id) async {
+    final res = await http.get(
+      Uri.parse('$base/customers/plots/$id/my-rating'),
+      headers: await _headers(),
+    );
+    return _handle(res);
+  }
+
   // ── VISIT BOOKING ─────────────────────────────────────────────
   static Future<Map<String, dynamic>> bookVisit({
     required String plotId,
@@ -191,7 +235,7 @@ class Api {
   }) async {
     final res = await http.post(
       Uri.parse('$base/customers/visits'),
-      headers: await _headers(auth: false),
+      headers: await _headers(), // send the logged-in customer's token
       body: jsonEncode({
         'propertyId': plotId,
         'visitorName': visitorName,
@@ -282,6 +326,28 @@ class Api {
   static Future<Map<String, dynamic>> cancelVisit(String id) async {
     final res = await http.patch(Uri.parse('$base/customers/visits/$id/cancel'),
         headers: await _headers());
+    return _handle(res);
+  }
+
+  // Customer accepts the slot currently on the table (e.g. owner's proposal)
+  static Future<Map<String, dynamic>> acceptVisit(String id) async {
+    final res = await http.patch(Uri.parse('$base/customers/visits/$id/accept'),
+        headers: await _headers());
+    return _handle(res);
+  }
+
+  // Customer counter-proposes a different slot
+  static Future<Map<String, dynamic>> proposeVisit(
+    String id, {
+    required String newDate,
+    required String newTime,
+    String note = '',
+  }) async {
+    final res = await http.patch(
+      Uri.parse('$base/customers/visits/$id/propose'),
+      headers: await _headers(),
+      body: jsonEncode({'newDate': newDate, 'newTime': newTime, 'note': note}),
+    );
     return _handle(res);
   }
 

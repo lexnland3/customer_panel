@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "756869712541",
+    "project_id": "lexnland-2f518",
+    "storage_bucket": "lexnland-2f518.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:756869712541:android:ed9208c14e6f9eafe4a274",
+        "android_client_info": {
+          "package_name": "com.example.customer"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "756869712541-mcvumiqt63ii76s60m21690gm4ena89s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDBTY9LEYTSpBJv7i9CiMxP26B0Aa2ma0A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "756869712541-mcvumiqt63ii76s60m21690gm4ena89s.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:756869712541:android:12669f4a78b13a9ee4a274",
+        "android_client_info": {
+          "package_name": "com.example.owner_panel"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "756869712541-mcvumiqt63ii76s60m21690gm4ena89s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDBTY9LEYTSpBJv7i9CiMxP26B0Aa2ma0A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "756869712541-mcvumiqt63ii76s60m21690gm4ena89s.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

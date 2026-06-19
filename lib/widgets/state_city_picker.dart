@@ -104,7 +104,7 @@ class _StateCityPickerState extends State<StateCityPicker> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         DropdownButtonFormField<String>(
-          value: widget.state.isEmpty
+          initialValue: widget.state.isEmpty
               ? null
               : (kIndiaStates.contains(widget.state) ? widget.state : null),
           isExpanded: true,

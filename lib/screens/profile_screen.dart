@@ -3,6 +3,8 @@ import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import 'login_screen.dart';
 import 'edit_profile_screen.dart';
+import 'contact_us_screen.dart';
+import 'info_pages.dart';
 
 class ProfileTab extends StatefulWidget {
   const ProfileTab({super.key});
@@ -75,15 +77,16 @@ class _GuestView extends StatelessWidget {
           height: 90,
           decoration: const BoxDecoration(
               color: C.primaryLight, shape: BoxShape.circle),
-          child:
-              const Center(child: Text('🌿', style: TextStyle(fontSize: 44))),
+          child: Center(
+              child: Image.asset('assets/images/logo_small.png',
+                  width: 46, height: 46)),
         ),
         const SizedBox(height: 20),
         const Text('You\'re browsing as a guest',
             style: TextStyle(
                 fontSize: 18, fontWeight: FontWeight.w700, color: C.textDark)),
         const SizedBox(height: 8),
-        const Text('Sign in to book visits and save plots',
+        const Text('Sign in to save plots and chat with owners',
             style: TextStyle(color: C.textMuted)),
         const SizedBox(height: 28),
         SizedBox(
@@ -229,7 +232,9 @@ class _UserView extends StatelessWidget {
             label: 'Occupation',
             value: _cap((user['occupation'] ?? '') as String)),
         const SizedBox(height: 16),
-        const _SupportSection(),
+        _AppMenu(user: user),
+        const SizedBox(height: 16),
+        const _RateExperience(),
         const SizedBox(height: 24),
         SizedBox(
             width: double.infinity,
@@ -276,36 +281,70 @@ class _InfoTile extends StatelessWidget {
       );
 }
 
-// ── Ask a Problem / Contact Us ───────────────────────────────
-class _SupportSection extends StatefulWidget {
-  const _SupportSection();
+// ── App menu (Contact / About / Terms / Privacy) ─────────────
+class _AppMenu extends StatelessWidget {
+  final Map<String, dynamic> user;
+  const _AppMenu({required this.user});
+
+  Widget _tile(BuildContext context, IconData icon, String title,
+          VoidCallback onTap, bool divider) =>
+      Column(children: [
+        ListTile(
+          leading: Icon(icon, color: C.primary, size: 20),
+          title: Text(title,
+              style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: C.textDark)),
+          trailing: const Icon(Icons.chevron_right_rounded, color: C.textLight),
+          onTap: onTap,
+        ),
+        if (divider) const Divider(height: 1, color: C.border),
+      ]);
+
   @override
-  State<_SupportSection> createState() => _SupportSectionState();
+  Widget build(BuildContext context) {
+    void go(Widget screen) =>
+        Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: C.border),
+      ),
+      child: Column(children: [
+        _tile(context, Icons.support_agent_rounded, 'Contact Us',
+            () => go(ContactUsScreen(user: user)), true),
+        _tile(context, Icons.info_outline_rounded, 'About Us',
+            () => go(const AboutUsScreen()), true),
+        _tile(context, Icons.description_outlined, 'Terms & Conditions',
+            () => go(const TermsScreen()), true),
+        _tile(context, Icons.privacy_tip_outlined, 'Privacy Policy',
+            () => go(const PrivacyScreen()), false),
+      ]),
+    );
+  }
 }
 
-class _SupportSectionState extends State<_SupportSection> {
-  final TextEditingController _ctrl = TextEditingController();
-  bool _sending = false;
-
+// ── Rate your experience (app feedback -> support inbox) ─────
+class _RateExperience extends StatefulWidget {
+  const _RateExperience();
   @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+  State<_RateExperience> createState() => _RateExperienceState();
+}
 
-  Future<void> _send() async {
-    final msg = _ctrl.text.trim();
-    if (msg.isEmpty) return;
+class _RateExperienceState extends State<_RateExperience> {
+  int _rating = 0;
+  bool _sending = false;
+  bool _done = false;
+
+  Future<void> _submit() async {
+    if (_rating == 0) return;
     setState(() => _sending = true);
     try {
-      await Api.submitProblem(msg);
-      _ctrl.clear();
-      if (mounted) {
-        FocusScope.of(context).unfocus();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('✅ Sent! Our team will reply to your email.'),
-            backgroundColor: C.success));
-      }
+      await Api.submitProblem(
+          'App rating: $_rating/5 stars (Rate your experience)');
+      if (mounted) setState(() => _done = true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -320,6 +359,7 @@ class _SupportSectionState extends State<_SupportSection> {
   @override
   Widget build(BuildContext context) {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -327,63 +367,55 @@ class _SupportSectionState extends State<_SupportSection> {
         border: Border.all(color: C.border),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Row(children: [
-          Icon(Icons.support_agent_rounded, size: 18, color: C.primary),
-          SizedBox(width: 8),
-          Text('Ask a Problem',
-              style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: C.textDark)),
-        ]),
-        const SizedBox(height: 6),
-        const Text(
-            'Describe your issue and our team will get back to you on your email.',
+        const Text('Rate Your Experience',
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w800, color: C.textDark)),
+        const SizedBox(height: 4),
+        const Text('How is your experience with the app so far?',
             style: TextStyle(fontSize: 12, color: C.textMuted)),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _ctrl,
-          minLines: 3,
-          maxLines: 6,
-          decoration: InputDecoration(
-            hintText: 'Type your problem here…',
-            hintStyle: const TextStyle(color: C.textLight, fontSize: 14),
-            filled: true,
-            fillColor: C.bg,
-            contentPadding: const EdgeInsets.all(12),
-            border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: C.border)),
-            enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: C.border)),
-            focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: C.primary, width: 1.5)),
-          ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: _sending ? null : _send,
-            icon: _sending
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 2))
-                : const Icon(Icons.send_rounded, size: 18),
-            label: Text(_sending ? 'Sending…' : 'Send'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: C.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 13),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+        const SizedBox(height: 10),
+        if (_done)
+          Row(children: const [
+            Icon(Icons.check_circle_rounded, color: C.success, size: 20),
+            SizedBox(width: 8),
+            Text('Thanks for your feedback!',
+                style:
+                    TextStyle(color: C.success, fontWeight: FontWeight.w700)),
+          ])
+        else ...[
+          Row(
+              children: List.generate(5, (i) {
+            final filled = i < _rating;
+            return GestureDetector(
+              onTap: _sending ? null : () => setState(() => _rating = i + 1),
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Icon(
+                    filled ? Icons.star_rounded : Icons.star_border_rounded,
+                    color: const Color(0xFFFFA726),
+                    size: 34),
+              ),
+            );
+          })),
+          if (_rating > 0) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _sending ? null : _submit,
+                icon: _sending
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
+                    : const Icon(Icons.send_rounded, size: 18),
+                label: Text(_sending ? 'Sending…' : 'Send feedback'),
+              ),
             ),
-          ),
-        ),
+          ],
+        ],
       ]),
     );
   }

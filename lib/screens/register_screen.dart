@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
@@ -72,7 +73,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final provider = GoogleAuthProvider()
         ..addScope('email')
         ..addScope('profile');
-      final cred = await FirebaseAuth.instance.signInWithPopup(provider);
+      final cred = kIsWeb
+          ? await FirebaseAuth.instance.signInWithPopup(provider)
+          : await FirebaseAuth.instance.signInWithProvider(provider);
       final user = cred.user;
       if (user == null) throw Exception('Google sign-in failed.');
       final idToken = await user.getIdToken();
@@ -202,8 +205,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           border: Border.all(
                               color: Colors.white.withValues(alpha: 0.25)),
                         ),
-                        child: const Center(
-                            child: Text('🌿', style: TextStyle(fontSize: 26))),
+                        child: Center(
+                            child: Padding(
+                                padding: const EdgeInsets.all(9),
+                                child: Image.asset(
+                                    'assets/images/logo_small_white.png',
+                                    fit: BoxFit.contain))),
                       ),
                       const SizedBox(width: 10),
                       const Text('Lex n Land',

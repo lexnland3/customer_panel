@@ -875,7 +875,7 @@ class _MsgBubble extends StatelessWidget {
             _VoiceMessage(
               url: audioUrl.startsWith('http')
                   ? audioUrl
-                  : 'http://localhost:5000$audioUrl',
+                  : '${Api.mediaBase}$audioUrl',
               isMe: isMe,
               durationSecs: (msg['audioDuration'] as num?)?.toInt() ?? 0,
             ),
@@ -885,7 +885,7 @@ class _MsgBubble extends StatelessWidget {
               child: Image.network(
                 imageUrl.startsWith('http')
                     ? imageUrl
-                    : 'http://localhost:5000$imageUrl',
+                    : '${Api.mediaBase}$imageUrl',
                 width: 220,
                 fit: BoxFit.cover,
                 loadingBuilder: (_, child, prog) => prog == null
@@ -1045,7 +1045,7 @@ class _EmptyChat extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                   color: C.textDark)),
           const SizedBox(height: 6),
-          const Text('Ask about the plot or schedule a visit',
+          const Text('Ask about the plot',
               style: TextStyle(color: C.textMuted, fontSize: 13)),
         ]),
       );

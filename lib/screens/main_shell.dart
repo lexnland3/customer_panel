@@ -4,7 +4,7 @@ import '../services/api_service.dart';
 import 'home_screen.dart';
 import 'favourites_screen.dart';
 import 'chat_list_screen.dart';
-import 'wishlist_screen.dart';
+// import 'wishlist_screen.dart'; // scheduled-visit feature disabled
 import 'profile_screen.dart';
 import 'login_screen.dart';
 
@@ -50,7 +50,7 @@ class _MainShellState extends State<MainShell> {
           HomeTab(onSwitchTab: (i) => setState(() => _index = i)),
           const FavouritesTab(),
           const ChatListTab(),
-          const WishlistTab(),
+          // const WishlistTab(), // scheduled-visit feature disabled
           const ProfileTab(),
         ],
       ),
@@ -89,20 +89,14 @@ class _MainShellState extends State<MainShell> {
                   idx: 2,
                   cur: _index,
                   onTap: () => setState(() => _index = 2)),
-              _NavItem(
-                  icon: Icons.calendar_today_outlined,
-                  activeIcon: Icons.calendar_today_rounded,
-                  label: 'My Booking',
-                  idx: 3,
-                  cur: _index,
-                  onTap: () => setState(() => _index = 3)),
+              // My Booking tab removed — scheduled-visit feature disabled
               _NavItem(
                   icon: Icons.person_outline_rounded,
                   activeIcon: Icons.person_rounded,
                   label: 'Profile',
-                  idx: 4,
+                  idx: 3,
                   cur: _index,
-                  onTap: () => setState(() => _index = 4)),
+                  onTap: () => setState(() => _index = 3)),
             ]),
           ),
         ),
@@ -181,8 +175,11 @@ class _AuthGate extends StatelessWidget {
                       offset: const Offset(0, 8))
                 ],
               ),
-              child: const Center(
-                  child: Text('🌿', style: TextStyle(fontSize: 60))),
+              child: Center(
+                  child: Padding(
+                      padding: const EdgeInsets.all(28),
+                      child: Image.asset('assets/images/logo_small_white.png',
+                          fit: BoxFit.contain))),
             ),
             const SizedBox(height: 32),
             const Text('Welcome to\nLex n Land',
@@ -194,7 +191,7 @@ class _AuthGate extends StatelessWidget {
                     height: 1.2)),
             const SizedBox(height: 12),
             const Text(
-                'Sign in with Google to explore verified plots,\nchat with owners and book site visits.',
+                'Sign in with Google to explore verified plots\nand chat with owners.',
                 textAlign: TextAlign.center,
                 style:
                     TextStyle(fontSize: 14, color: C.textMuted, height: 1.5)),
@@ -210,9 +207,6 @@ class _AuthGate extends StatelessWidget {
             const _FeatureRow(
                 icon: Icons.chat_bubble_outline_rounded,
                 text: 'Chat directly with owners'),
-            const _FeatureRow(
-                icon: Icons.calendar_today_rounded,
-                text: 'Schedule on-site visits'),
           ]),
         ),
       ),

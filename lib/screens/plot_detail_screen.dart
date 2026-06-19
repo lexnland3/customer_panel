@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
-import 'book_visit_screen.dart';
+// import 'book_visit_screen.dart'; // scheduled-visit feature disabled
 import 'chat_screen.dart';
 
 class PlotDetailScreen extends StatefulWidget {
@@ -14,6 +14,8 @@ class PlotDetailScreen extends StatefulWidget {
 
 class _PlotDetailScreenState extends State<PlotDetailScreen> {
   Map<String, dynamic>? _plot;
+  int _myRating = 0;
+  bool _ratingBusy = false;
   bool _loading = true;
   bool _isFav = false;
   int _activePhoto = 0;
@@ -55,9 +57,98 @@ class _PlotDetailScreenState extends State<PlotDetailScreen> {
           _loading = false;
         });
       _checkFav();
+      _loadMyRating();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _loadMyRating() async {
+    try {
+      final res = await Api.myPlotRating(widget.plotId);
+      if (mounted && res['success'] == true) {
+        setState(() => _myRating = (res['myRating'] as num?)?.toInt() ?? 0);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _submitRating(int r) async {
+    setState(() => _ratingBusy = true);
+    try {
+      final res = await Api.ratePlot(widget.plotId, r);
+      if (mounted && res['success'] == true) {
+        setState(() {
+          _myRating = (res['myRating'] as num?)?.toInt() ?? r;
+          if (_plot != null) {
+            _plot!['ratingAverage'] = res['ratingAverage'];
+            _plot!['ratingCount'] = res['ratingCount'];
+          }
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Thanks for rating!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Could not submit rating. Please sign in and try again.'),
+              backgroundColor: C.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _ratingBusy = false);
+    }
+  }
+
+  Widget _buildRatingSection() {
+    final avg = (_plot?['ratingAverage'] as num?)?.toDouble() ?? 0.0;
+    final count = _plot?['ratingCount'] as int? ?? 0;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: C.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: C.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.star_rounded, color: Color(0xFFFFA726), size: 22),
+          const SizedBox(width: 6),
+          Text(count > 0 ? avg.toStringAsFixed(1) : 'No ratings yet',
+              style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: C.textDark)),
+          const SizedBox(width: 6),
+          if (count > 0)
+            Text('($count ${count == 1 ? "rating" : "ratings"})',
+                style: const TextStyle(fontSize: 13, color: C.textMuted)),
+        ]),
+        const SizedBox(height: 12),
+        Text(_myRating > 0 ? 'Your rating' : 'Rate this plot',
+            style: const TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w700, color: C.textMuted)),
+        const SizedBox(height: 6),
+        Row(
+            children: List.generate(5, (i) {
+          final filled = i < _myRating;
+          return GestureDetector(
+            onTap: _ratingBusy ? null : () => _submitRating(i + 1),
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Icon(
+                  filled ? Icons.star_rounded : Icons.star_border_rounded,
+                  color: const Color(0xFFFFA726),
+                  size: 32),
+            ),
+          );
+        })),
+      ]),
+    );
   }
 
   Future<void> _checkFav() async {
@@ -136,8 +227,9 @@ class _PlotDetailScreenState extends State<PlotDetailScreen> {
               background: photos.isEmpty
                   ? Container(
                       color: C.primaryLight,
-                      child: const Center(
-                          child: Text('🌿', style: TextStyle(fontSize: 80))))
+                      child: Center(
+                          child: Image.asset('assets/images/logo_small.png',
+                              width: 96, height: 96)))
                   : Stack(fit: StackFit.expand, children: [
                       PageView.builder(
                         itemCount: photos.length,
@@ -147,9 +239,11 @@ class _PlotDetailScreenState extends State<PlotDetailScreen> {
                           fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => Container(
                               color: C.primaryLight,
-                              child: const Center(
-                                  child: Text('🌿',
-                                      style: TextStyle(fontSize: 60)))),
+                              child: Center(
+                                  child: Image.asset(
+                                      'assets/images/logo_small.png',
+                                      width: 72,
+                                      height: 72))),
                         ),
                       ),
                       // Photo counter
@@ -241,6 +335,8 @@ class _PlotDetailScreenState extends State<PlotDetailScreen> {
                                   ]),
                             ),
                         ]),
+                    const SizedBox(height: 16),
+                    _buildRatingSection(),
                     const SizedBox(height: 20),
 
                     // Price card
@@ -452,31 +548,7 @@ class _PlotDetailScreenState extends State<PlotDetailScreen> {
                     const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
               ),
             )),
-            const SizedBox(width: 10),
-            // Book Visit
-            Expanded(
-                flex: 2,
-                child: ElevatedButton.icon(
-                  onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => BookVisitScreen(
-                          plotId: widget.plotId,
-                          plotName: _plot!['propertyName'] ?? 'Plot',
-                        ),
-                      )),
-                  icon: const Icon(Icons.calendar_today_rounded, size: 17),
-                  label: const Text('Book Visit'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: C.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    textStyle: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w800),
-                  ),
-                )),
+            // Book Visit button removed — scheduled-visit feature disabled
           ]),
         ),
       ),
@@ -572,7 +644,7 @@ class _OwnerBadge extends StatelessWidget {
 }
 
 String _fullUrl(String url) =>
-    url.startsWith('http') ? url : 'http://localhost:5000$url';
+    url.startsWith('http') ? url : '${Api.mediaBase}$url';
 String _fmt(int n) {
   if (n >= 10000000) return '${(n / 10000000).toStringAsFixed(1)} Cr';
   if (n >= 100000) return '${(n / 100000).toStringAsFixed(1)} L';

@@ -182,7 +182,7 @@ class _EmptyFav extends StatelessWidget {
   );
 }
 
-String _fullUrl(String url) => url.startsWith('http') ? url : 'http://localhost:5000$url';
+String _fullUrl(String url) => url.startsWith('http') ? url : '${Api.mediaBase}$url';
 String _fmt(int n) {
   if (n >= 10000000) return '${(n/10000000).toStringAsFixed(1)}Cr';
   if (n >= 100000)   return '${(n/100000).toStringAsFixed(1)}L';

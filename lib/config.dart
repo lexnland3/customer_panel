@@ -1,3 +1,6 @@
+// NOTE: This file is NOT USED. The live backend URL lives in
+// lib/services/api_service.dart (the `base`/`baseUrl` constant). Edit it there.
+
 class Config {
   // ── Change this to your Render URL once deployed ──────────────
   // Example: 'https://lexnland-backend.onrender.com'

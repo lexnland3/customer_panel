@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import 'plot_detail_screen.dart';
+import '../widgets/state_city_picker.dart';
 
 class HomeTab extends StatefulWidget {
   final void Function(int) onSwitchTab;
@@ -16,6 +17,9 @@ class _HomeTabState extends State<HomeTab> {
   String _plotType = 'Any';
   int? _minPrice;
   int? _maxPrice;
+  String _state = '';
+  String _city = '';
+  String _location = ''; // user's own city/state shown in the top bar
   List<dynamic> _plots = [];
   Set<String> _favIds = {};
   bool _loading = true;
@@ -46,6 +50,26 @@ class _HomeTabState extends State<HomeTab> {
     super.initState();
     _load();
     _loadFavIds();
+    _loadLocation();
+  }
+
+  Future<void> _loadLocation() async {
+    // Show cached value instantly, then refresh from the server.
+    try {
+      _setLocation(await Api.getUser());
+    } catch (_) {}
+    try {
+      final res = await Api.getMe();
+      _setLocation(res['customer'] as Map<String, dynamic>?);
+    } catch (_) {}
+  }
+
+  void _setLocation(Map<String, dynamic>? u) {
+    if (u == null) return;
+    final city = (u['city'] ?? '').toString().trim();
+    final state = (u['state'] ?? '').toString().trim();
+    final loc = [city, state].where((s) => s.isNotEmpty).join(', ');
+    if (mounted && loc.isNotEmpty) setState(() => _location = loc);
   }
 
   Future<void> _loadFavIds() async {
@@ -70,6 +94,8 @@ class _HomeTabState extends State<HomeTab> {
         plotType: _plotType,
         minPrice: _minPrice,
         maxPrice: _maxPrice,
+        state: _state.isEmpty ? null : _state,
+        city: _city.isEmpty ? null : _city,
         page: reset ? 1 : _page,
       );
       final list = res['properties'] as List? ?? [];
@@ -120,9 +146,10 @@ class _HomeTabState extends State<HomeTab> {
                     const Icon(Icons.location_on_rounded,
                         color: C.primary, size: 18),
                     const SizedBox(width: 4),
-                    const Expanded(
-                        child: Text('Amritsar, Punjab',
-                            style: TextStyle(
+                    Expanded(
+                        child: Text(
+                            _location.isEmpty ? 'Set your location' : _location,
+                            style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
                                 color: C.textDark))),
@@ -267,7 +294,9 @@ class _HomeTabState extends State<HomeTab> {
             if (_facing != 'Any' ||
                 _plotType != 'Any' ||
                 _minPrice != null ||
-                _maxPrice != null)
+                _maxPrice != null ||
+                _state.isNotEmpty ||
+                _city.isNotEmpty)
               SliverToBoxAdapter(
                 child: SizedBox(
                   height: 34,
@@ -291,6 +320,19 @@ class _HomeTabState extends State<HomeTab> {
                             _minPrice = null;
                             _maxPrice = null;
                           });
+                          _load();
+                        }),
+                      if (_state.isNotEmpty)
+                        _FilterPill('State: $_state', () {
+                          setState(() {
+                            _state = '';
+                            _city = '';
+                          });
+                          _load();
+                        }),
+                      if (_city.isNotEmpty)
+                        _FilterPill('City: $_city', () {
+                          setState(() => _city = '');
                           _load();
                         }),
                     ],
@@ -330,6 +372,8 @@ class _HomeTabState extends State<HomeTab> {
                   _plotType = 'Any';
                   _minPrice = null;
                   _maxPrice = null;
+                  _state = '';
+                  _city = '';
                 });
                 _load();
               }))
@@ -396,6 +440,7 @@ class _HomeTabState extends State<HomeTab> {
 
   void _showFilters(BuildContext context) {
     String tf = _facing, tp = _plotType;
+    String ts = _state, tc = _city;
     final tMinCtrl = TextEditingController(text: _minPrice?.toString() ?? '');
     final tMaxCtrl = TextEditingController(text: _maxPrice?.toString() ?? '');
     showModalBottomSheet(
@@ -407,132 +452,162 @@ class _HomeTabState extends State<HomeTab> {
           builder: (ctx, ss) => Padding(
                 padding: EdgeInsets.fromLTRB(
                     24, 24, 24, 24 + MediaQuery.of(ctx).viewInsets.bottom),
-                child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Filter Plots',
-                                style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w800,
-                                    color: C.textDark)),
-                            TextButton(
-                                onPressed: () {
-                                  ss(() {
-                                    tf = 'Any';
-                                    tp = 'Any';
-                                  });
-                                  tMinCtrl.clear();
-                                  tMaxCtrl.clear();
-                                },
-                                child: const Text('Reset',
-                                    style: TextStyle(color: C.primary))),
-                          ]),
-                      const SizedBox(height: 16),
-                      const Text('Plot Type',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w700, color: C.textDark)),
-                      const SizedBox(height: 8),
-                      Wrap(
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: _plotTypes
-                              .map((t) => ChoiceChip(
-                                    label: Text(t),
-                                    selected: tp == t,
-                                    onSelected: (_) => ss(() => tp = t),
-                                    selectedColor: C.primaryLight,
-                                    labelStyle: TextStyle(
-                                        color:
-                                            tp == t ? C.primary : C.textMuted,
-                                        fontWeight: FontWeight.w600),
-                                  ))
-                              .toList()),
-                      const SizedBox(height: 16),
-                      const Text('Price Range (Rs)',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w700, color: C.textDark)),
-                      const SizedBox(height: 8),
-                      Row(children: [
-                        Expanded(
-                            child: TextField(
-                          controller: tMinCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            hintText: 'Min',
-                            prefixText: 'Rs ',
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 12),
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10)),
-                            enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10),
-                                borderSide: const BorderSide(color: C.border)),
-                          ),
-                        )),
-                        const SizedBox(width: 12),
-                        Expanded(
-                            child: TextField(
-                          controller: tMaxCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            hintText: 'Max',
-                            prefixText: 'Rs ',
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 12),
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10)),
-                            enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10),
-                                borderSide: const BorderSide(color: C.border)),
-                          ),
-                        )),
-                      ]),
-                      const SizedBox(height: 16),
-                      const Text('Facing',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w700, color: C.textDark)),
-                      const SizedBox(height: 8),
-                      Wrap(
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: _facings
-                              .map((f) => ChoiceChip(
-                                    label: Text(f),
-                                    selected: tf == f,
-                                    onSelected: (_) => ss(() => tf = f),
-                                    selectedColor: C.primaryLight,
-                                    labelStyle: TextStyle(
-                                        color:
-                                            tf == f ? C.primary : C.textMuted,
-                                        fontWeight: FontWeight.w600),
-                                  ))
-                              .toList()),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: () {
-                              final mn = int.tryParse(tMinCtrl.text.trim());
-                              final mx = int.tryParse(tMaxCtrl.text.trim());
-                              setState(() {
-                                _facing = tf;
-                                _plotType = tp;
-                                _minPrice = mn;
-                                _maxPrice = mx;
-                              });
-                              Navigator.pop(ctx);
-                              _load();
-                            },
-                            child: const Text('Apply Filters'),
+                child: SingleChildScrollView(
+                  child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Filter Plots',
+                                  style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                      color: C.textDark)),
+                              TextButton(
+                                  onPressed: () {
+                                    ss(() {
+                                      tf = 'Any';
+                                      tp = 'Any';
+                                      ts = '';
+                                      tc = '';
+                                    });
+                                    tMinCtrl.clear();
+                                    tMaxCtrl.clear();
+                                  },
+                                  child: const Text('Reset',
+                                      style: TextStyle(color: C.primary))),
+                            ]),
+                        const SizedBox(height: 16),
+                        const Text('Plot Type',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: C.textDark)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: _plotTypes
+                                .map((t) => ChoiceChip(
+                                      label: Text(t),
+                                      selected: tp == t,
+                                      onSelected: (_) => ss(() => tp = t),
+                                      selectedColor: C.primaryLight,
+                                      labelStyle: TextStyle(
+                                          color:
+                                              tp == t ? C.primary : C.textMuted,
+                                          fontWeight: FontWeight.w600),
+                                    ))
+                                .toList()),
+                        const SizedBox(height: 16),
+                        const Text('Price Range (Rs)',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: C.textDark)),
+                        const SizedBox(height: 8),
+                        Row(children: [
+                          Expanded(
+                              child: TextField(
+                            controller: tMinCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: InputDecoration(
+                              hintText: 'Min',
+                              prefixText: 'Rs ',
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 12),
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10)),
+                              enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide:
+                                      const BorderSide(color: C.border)),
+                            ),
                           )),
-                      const SizedBox(height: 8),
-                    ]),
+                          const SizedBox(width: 12),
+                          Expanded(
+                              child: TextField(
+                            controller: tMaxCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: InputDecoration(
+                              hintText: 'Max',
+                              prefixText: 'Rs ',
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 12),
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10)),
+                              enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide:
+                                      const BorderSide(color: C.border)),
+                            ),
+                          )),
+                        ]),
+                        const SizedBox(height: 16),
+                        const Text('Facing',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: C.textDark)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: _facings
+                                .map((f) => ChoiceChip(
+                                      label: Text(f),
+                                      selected: tf == f,
+                                      onSelected: (_) => ss(() => tf = f),
+                                      selectedColor: C.primaryLight,
+                                      labelStyle: TextStyle(
+                                          color:
+                                              tf == f ? C.primary : C.textMuted,
+                                          fontWeight: FontWeight.w600),
+                                    ))
+                                .toList()),
+                        const SizedBox(height: 16),
+                        const Text('Location',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: C.textDark)),
+                        const SizedBox(height: 8),
+                        StateCityPicker(
+                          key: ValueKey('scp_' + ts),
+                          state: ts,
+                          city: tc,
+                          accent: C.primary,
+                          citySearch: Api.searchCities,
+                          onStateChanged: (v) => ss(() {
+                            ts = v;
+                            tc =
+                                ''; // reset city when state changes (no mismatch)
+                          }),
+                          onCityChanged: (v) => ss(() => tc = v),
+                        ),
+                        const SizedBox(height: 20),
+                        SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: () {
+                                final mn = int.tryParse(tMinCtrl.text.trim());
+                                final mx = int.tryParse(tMaxCtrl.text.trim());
+                                setState(() {
+                                  _facing = tf;
+                                  _plotType = tp;
+                                  _minPrice = mn;
+                                  _maxPrice = mx;
+                                  _state = ts.trim();
+                                  _city = tc.trim();
+                                });
+                                Navigator.pop(ctx);
+                                _load();
+                              },
+                              child: const Text('Apply Filters'),
+                            )),
+                        const SizedBox(height: 8),
+                      ]),
+                ),
               )),
     ).whenComplete(() {
       tMinCtrl.dispose();
@@ -564,6 +639,8 @@ class _PlotCard extends StatelessWidget {
     final isVerified = plot['isVerified'] as bool? ?? false;
     final location = plot['location'] as String? ?? '';
     final name = plot['propertyName'] as String? ?? 'Plot';
+    final ratingAvg = (plot['ratingAverage'] as num?)?.toDouble() ?? 0.0;
+    final ratingCount = plot['ratingCount'] as int? ?? 0;
     final facilities = d['facilities'] as List? ?? [];
 
     return GestureDetector(
@@ -655,13 +732,13 @@ class _PlotCard extends StatelessWidget {
                             color: C.textDark),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis)),
-                if (isVerified)
-                  Row(mainAxisSize: MainAxisSize.min, children: const [
-                    Icon(Icons.star_rounded,
+                if (ratingCount > 0)
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.star_rounded,
                         color: Color(0xFFFFA726), size: 14),
-                    SizedBox(width: 2),
-                    Text('4.9',
-                        style: TextStyle(
+                    const SizedBox(width: 2),
+                    Text(ratingAvg.toStringAsFixed(1),
+                        style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                             color: Color(0xFFFFA726))),
@@ -781,7 +858,7 @@ class _Empty extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Center(
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const Text('🌿', style: TextStyle(fontSize: 60)),
+          Image.asset('assets/images/logo_small.png', width: 64, height: 64),
           const SizedBox(height: 14),
           const Text('No plots found',
               style: TextStyle(
@@ -802,7 +879,7 @@ class _Empty extends StatelessWidget {
 }
 
 String _fullUrl(String url) =>
-    url.startsWith('http') ? url : 'http://localhost:5000$url';
+    url.startsWith('http') ? url : '${Api.mediaBase}$url';
 String _fmt(int n) {
   if (n >= 10000000) return '${(n / 10000000).toStringAsFixed(1)}Cr';
   if (n >= 100000) return '${(n / 100000).toStringAsFixed(1)}L';

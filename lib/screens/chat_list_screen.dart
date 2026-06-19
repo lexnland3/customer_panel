@@ -200,4 +200,4 @@ class _EmptyChats extends StatelessWidget {
   );
 }
 
-String _fullUrl(String url) => url.startsWith('http') ? url : 'http://localhost:5000$url';
+String _fullUrl(String url) => url.startsWith('http') ? url : '${Api.mediaBase}$url';
